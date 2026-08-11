@@ -306,7 +306,7 @@ class DteBuilder
                 throw new SiiException("Campo requerido faltante: '{$key}'.");
             }
         }
-        if (empty($datos['detalle'])) {
+        if (count($datos['detalle']) === 0) {
             throw new SiiException('El DTE debe tener al menos una línea de detalle.');
         }
         foreach ($datos['detalle'] as $i => $item) {

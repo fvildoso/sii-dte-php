@@ -15,7 +15,6 @@ use DOMXPath;
 class XmlSigner
 {
     private string $privateKey;
-    private string $publicCert;
     private string $certData; // Base64 del certificado público
 
     public function __construct(string $certPath, string $certPassword)
@@ -49,7 +48,7 @@ class XmlSigner
             throw new SiiException('No se encontró el nodo Documento en el XML.');
         }
 
-        $docId = $docNode->getAttribute('ID');
+        $docId = $docNode instanceof \DOMElement ? $docNode->getAttribute('ID') : '';
         if (empty($docId)) {
             throw new SiiException('El nodo Documento no tiene atributo ID.');
         }
@@ -104,7 +103,7 @@ class XmlSigner
             throw new SiiException('No se encontró el nodo SetDTE.');
         }
 
-        $setId = $setNode->getAttribute('ID');
+        $setId = $setNode instanceof \DOMElement ? $setNode->getAttribute('ID') : '';
         $c14n  = $setNode->C14N();
         $digest = base64_encode(sha1($c14n, true));
 
@@ -245,7 +244,6 @@ class XmlSigner
             $this->privateKey = $certs['pkey'];
             // Limpiar encabezados PEM para obtener solo el base64
             $this->certData = $this->cleanCert($certs['cert']);
-            $this->publicCert = $certs['cert'];
             return;
         }
 
@@ -258,7 +256,6 @@ class XmlSigner
             if (file_exists($crtPath)) {
                 $certPem = file_get_contents($crtPath);
                 $this->certData   = $this->cleanCert($certPem);
-                $this->publicCert = $certPem;
             }
             return;
         }

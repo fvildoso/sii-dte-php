@@ -39,11 +39,6 @@ use SiiDte\Exceptions\SiiException;
  */
 class PdfGenerator
 {
-    private const PDF_URLS = [
-        'certificacion' => 'https://maullin.sii.cl/cgi_dte/UPL/DTEUpload',
-        'produccion'    => 'https://palena.sii.cl/cgi_dte/UPL/DTEUpload',
-    ];
-
     // URL real del servicio de visualización de DTE del SII
     private const VISTA_URLS = [
         'certificacion' => 'https://maullin.sii.cl/cgi_dte/Of_Cartola/cartola_dte.cgi',
@@ -163,7 +158,7 @@ class PdfGenerator
         $doc->loadXML($xml);
 
         $get = function (string $tag, \DOMDocument $d) {
-            return $d->getElementsByTagName($tag)->item(0)?->textContent ?? '';
+            return $d->getElementsByTagName($tag)->item(0)->textContent ?? '';
         };
 
         return [
@@ -202,7 +197,7 @@ class PdfGenerator
     {
         $items = [];
         foreach ($doc->getElementsByTagName('Detalle') as $det) {
-            $get = fn(string $t) => $det->getElementsByTagName($t)->item(0)?->textContent ?? '';
+            $get = fn(string $t) => $det->getElementsByTagName($t)->item(0)->textContent ?? '';
             $items[] = [
                 'nombre'      => $get('NmbItem'),
                 'descripcion' => $get('DscItem'),

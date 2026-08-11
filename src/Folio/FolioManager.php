@@ -209,7 +209,7 @@ class FolioManager
      * @param int|null $tipoDte Código del tipo de DTE (opcional)
      * @return array Resumen de rangos y disponibilidad
      */
-    public function estadoCafs(int $tipoDte = null): array
+    public function estadoCafs(?int $tipoDte = null): array
     {
         $sql = 'SELECT tipo_dte, folio_desde, folio_hasta, siguiente_folio, estado,
                        fecha_vencimiento,
@@ -245,17 +245,17 @@ class FolioManager
             throw new SiiException('El archivo CAF no es un XML válido.');
         }
 
-        $get = fn(string $tag) => $doc->getElementsByTagName($tag)->item(0)?->textContent ?? null;
+        $get = fn(string $tag) => $doc->getElementsByTagName($tag)->item(0)->textContent ?? null;
 
         $tipo  = (int) $get('TD');
         $desde = (int) $get('RNG') ? null : (int) ($doc->getElementsByTagName('D')->item(0)?->textContent);
-        $hasta = (int) ($doc->getElementsByTagName('H')->item(0)?->textContent ?? 0);
+        $hasta = (int) ($doc->getElementsByTagName('H')->item(0)->textContent ?? 0);
 
         // El CAF tiene <RNG><D>inicio</D><H>fin</H></RNG>
         $rngNode = $doc->getElementsByTagName('RNG')->item(0);
         if ($rngNode) {
-            $desde = (int) $rngNode->getElementsByTagName('D')->item(0)?->textContent;
-            $hasta = (int) $rngNode->getElementsByTagName('H')->item(0)?->textContent;
+            $desde = (int) ($doc->getElementsByTagName('D')->item(0)->textContent ?? null);
+            $hasta = (int) ($doc->getElementsByTagName('H')->item(0)->textContent ?? null);
         }
 
         $vencimiento = $get('FA'); // Fecha de autorización, CAFs no vencen pero la registramos
