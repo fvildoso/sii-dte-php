@@ -3,6 +3,6 @@ parameters:
     paths:
         - src
     ignoreErrors:
-        # openssl_pkcs12_read llena $certs por referencia, PHPStan no lo entiende bien
+        # openssl_pkcs12_read llena $certs por referencia, PHPStan no lo detecta
         - '#Variable \$certs might not be defined#'
-    checkMissingIterableValueType: false
+        - identifier: missingType.iterableValue
