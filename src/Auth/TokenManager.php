@@ -39,6 +39,7 @@ class TokenManager
      *
      * @param string $rut RUT del emisor (sin DV)
      * @param string $dv  Dígito verificador
+     * @return string Token de sesión obtenido
      */
     public function getToken(string $rut, string $dv): string
     {
@@ -58,6 +59,9 @@ class TokenManager
 
     /**
      * Paso 1: Obtener la semilla del SII.
+     *
+     * @return string Semilla obtenida
+     * @throws SiiException Si ocurre un error al obtener la semilla
      */
     private function getSeed(): string
     {
@@ -79,6 +83,12 @@ class TokenManager
 
     /**
      * Paso 2: Firmar semilla y obtener token.
+     *
+     * @param string $seed Semilla obtenida del SII
+     * @param string $rut Cuerpo del RUT
+     * @param string $dv Dígito verificador
+     * @return string Token de sesión
+     * @throws SiiException Si la firma falla o el SII rechaza la solicitud
      */
     private function requestToken(string $seed, string $rut, string $dv): string
     {
@@ -107,6 +117,12 @@ class TokenManager
 
     /**
      * Realiza una llamada SOAP básica al SII.
+     *
+     * @param string $url URL del servicio
+     * @param string $action Acción SOAP a ejecutar
+     * @param string $body Cuerpo XML de la petición
+     * @return string Respuesta del servidor
+     * @throws SiiException Si ocurre un error de red
      */
     private function soapCall(string $url, string $action, string $body): string
     {
@@ -142,6 +158,12 @@ class TokenManager
         return (string) $response;
     }
 
+    /**
+     * Obtiene la URL base según el ambiente configurado.
+     *
+     * @return string URL base del ambiente
+     * @throws SiiException Si el ambiente no es reconocido
+     */
     private function getBaseUrl(): string
     {
         return self::ENDPOINTS[$this->ambiente]

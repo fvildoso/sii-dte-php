@@ -58,6 +58,8 @@ class CertificateStore
      *
      * @param string $certPath     Ruta absoluta al .p12 (FUERA del webroot)
      * @param string $certPassword Contraseña del certificado
+     * @return self Instancia de CertificateStore
+     * @throws SiiException Si el archivo no existe, no es legible, es inseguro o ha vencido
      *
      * Ejemplo de uso correcto:
      *   $store = CertificateStore::fromFile('/var/secure/certs/empresa.p12', getenv('CERT_PASS'));
@@ -86,6 +88,8 @@ class CertificateStore
      *
      * @param string $b64EnvVar   Nombre de la env var con el cert en base64 (default: SII_CERT_B64)
      * @param string $passEnvVar  Nombre de la env var con la contraseña (default: SII_CERT_PASS)
+     * @return self Instancia de CertificateStore
+     * @throws SiiException Si las variables de entorno no están definidas o el base64 es inválido
      */
     public static function fromEnv(
         string $b64EnvVar  = 'SII_CERT_B64',
@@ -122,6 +126,8 @@ class CertificateStore
 
     /**
      * Retorna la ruta al archivo .p12 en disco.
+     *
+     * @return string Ruta al certificado
      */
     public function getPath(): string
     {
@@ -130,6 +136,8 @@ class CertificateStore
 
     /**
      * Retorna la contraseña del certificado.
+     *
+     * @return string Contraseña del certificado
      */
     public function getPassword(): string
     {
@@ -139,6 +147,8 @@ class CertificateStore
     /**
      * Retorna información del certificado (RUT, razón social, vencimiento).
      * Útil para mostrar en el panel de administración.
+     *
+     * @return array Información detallada del certificado
      */
     public function getInfo(): array
     {
@@ -166,6 +176,9 @@ class CertificateStore
     /**
      * Devuelve true si el certificado vence en menos de $dias días.
      * Usa esto para enviar alertas de renovación.
+     *
+     * @param int $dias Cantidad de días para considerar vencimiento próximo
+     * @return bool True si vence dentro del plazo especificado
      */
     public function venceProximo(int $dias = 30): bool
     {
@@ -176,6 +189,12 @@ class CertificateStore
 
     private function __construct() {}
 
+    /**
+     * Valida la integridad y seguridad del certificado.
+     *
+     * @throws SiiException Si el certificado no es válido o es inseguro
+     * @return void
+     */
     private function validate(): void
     {
         if (!file_exists($this->certPath)) {

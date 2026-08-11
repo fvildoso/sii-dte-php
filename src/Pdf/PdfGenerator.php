@@ -150,6 +150,12 @@ class PdfGenerator
     }
 
 
+    /**
+     * Parsea el XML y extrae los datos necesarios para el PDF.
+     *
+     * @param string $xml Contenido XML del DTE
+     * @return array Datos estructurados del DTE
+     */
     private function parseXml(string $xml): array
     {
         libxml_use_internal_errors(true);
@@ -186,6 +192,12 @@ class PdfGenerator
         ];
     }
 
+    /**
+     * Extrae las líneas de detalle del XML.
+     *
+     * @param \DOMDocument $doc Documento DOM del DTE
+     * @return array Lista de ítems de detalle
+     */
     private function parseDetalle(\DOMDocument $doc): array
     {
         $items = [];
@@ -205,6 +217,13 @@ class PdfGenerator
         return $items;
     }
 
+    /**
+     * Renderiza el HTML básico para la representación impresa.
+     *
+     * @param array $d Datos del DTE
+     * @param array $opt Opciones de visualización
+     * @return string HTML renderizado
+     */
     private function renderHtml(array $d, array $opt): string
     {
         $color   = $opt['color_primario'] ?? '#1e3a5f';

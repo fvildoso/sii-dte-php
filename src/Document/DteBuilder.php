@@ -32,6 +32,14 @@ class DteBuilder
         $this->emisor = $config;
     }
 
+    /**
+     * Genera el XML del DTE.
+     *
+     * @param int $tipoDte Código del tipo de DTE (ej: 33 para Factura Electrónica)
+     * @param array $datos Datos del documento (folio, fecha, receptor, detalle, etc.)
+     * @return string XML generado en formato ISO-8859-1
+     * @throws SiiException Si faltan datos obligatorios o hay inconsistencias
+     */
     public function build(int $tipoDte, array $datos): string
     {
         $this->validateDatos($tipoDte, $datos);
@@ -59,6 +67,13 @@ class DteBuilder
         return $xml;
     }
 
+    /**
+     * Calcula los montos totales (neto, IVA, exento, total) a partir del detalle.
+     *
+     * @param int $tipoDte Código del tipo de DTE
+     * @param array $detalle Lista de ítems del documento
+     * @return array Mapa con los montos calculados
+     */
     public function calcularTotales(int $tipoDte, array $detalle): array
     {
         $sumaAfecta = 0;
@@ -91,6 +106,17 @@ class DteBuilder
         return $totales;
     }
 
+    /**
+     * Construye la sección Encabezado del XML.
+     *
+     * @param int $tipoDte Código del tipo de DTE
+     * @param int $folio Folio del documento
+     * @param string $fecha Fecha de emisión (AAAA-MM-DD)
+     * @param array $receptor Datos del receptor
+     * @param array $totales Montos totales calculados
+     * @param array $datos Datos adicionales del documento
+     * @return string Fragmento XML del encabezado
+     */
     private function buildEncabezado(int $tipoDte, int $folio, string $fecha, array $receptor, array $totales, array $datos): string
     {
         $rutEmisor = $this->emisor['rut_emisor'] . '-' . $this->emisor['dv_emisor'];
@@ -198,6 +224,14 @@ class DteBuilder
         return $h;
     }
 
+    /**
+     * Construye una línea de detalle en el XML.
+     *
+     * @param int $nroLinea Número de línea correlativo
+     * @param array $item Datos del producto o servicio
+     * @param int $tipoDte Código del tipo de DTE
+     * @return string Fragmento XML del ítem
+     */
     private function buildDetalle(int $nroLinea, array $item, int $tipoDte): string
     {
         $precio = (float) $item['precio_unitario'];
@@ -234,6 +268,12 @@ class DteBuilder
         return $d;
     }
 
+    /**
+     * Construye la sección Referencia del XML.
+     *
+     * @param array $ref Datos del documento referenciado
+     * @return string Fragmento XML de la referencia
+     */
     private function buildReferencia(array $ref): string
     {
         $r  = "    <Referencia>\n";
@@ -251,6 +291,14 @@ class DteBuilder
         return $r;
     }
 
+    /**
+     * Valida que los datos obligatorios estén presentes y sean correctos.
+     *
+     * @param int $tipoDte Código del tipo de DTE
+     * @param array $datos Datos a validar
+     * @throws SiiException Si falta algún campo requerido
+     * @return void
+     */
     private function validateDatos(int $tipoDte, array $datos): void
     {
         foreach (['folio', 'fecha', 'receptor', 'detalle'] as $key) {
@@ -280,6 +328,12 @@ class DteBuilder
         }
     }
 
+    /**
+     * Escapa caracteres especiales para el XML.
+     *
+     * @param string $text Texto a escapar
+     * @return string Texto escapado
+     */
     private function esc(string $text): string
     {
         return htmlspecialchars($text, ENT_XML1, 'ISO-8859-1');

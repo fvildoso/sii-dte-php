@@ -62,14 +62,24 @@ class SiiClient
         $this->builder      = new DteBuilder($config);
     }
 
-    /** Inyecta FolioManager para asignación automática de folios. */
+    /**
+     * Inyecta FolioManager para asignación automática de folios.
+     *
+     * @param FolioManager $fm Instancia del administrador de folios
+     * @return static La misma instancia para encadenamiento
+     */
     public function usarFolioManager(FolioManager $fm): static
     {
         $this->folioManager = $fm;
         return $this;
     }
 
-    /** Inyecta DteRepository para persistir los DTE en BD. */
+    /**
+     * Inyecta DteRepository para persistir los DTE en BD.
+     *
+     * @param DteRepository $repo Instancia del repositorio de DTE
+     * @return static La misma instancia para encadenamiento
+     */
     public function usarRepositorio(DteRepository $repo): static
     {
         $this->dteRepository = $repo;
@@ -83,7 +93,10 @@ class SiiClient
      *
      * Si se inyectó FolioManager, el folio se asigna automáticamente.
      *
-     * @return array {trackId, folio, xml, dte_id}
+     * @param int $tipoDte Código del tipo de DTE
+     * @param array $datos Datos del documento a emitir
+     * @return array {trackId: string, folio: int, xml: string, dte_id: int|null}
+     * @throws SiiException Si falta el folio o hay error en el envío
      */
     public function enviarDte(int $tipoDte, array $datos): array
     {
@@ -142,6 +155,10 @@ class SiiClient
 
     /**
      * Genera el XML firmado sin enviarlo (para preview o integración externa).
+     *
+     * @param int $tipoDte Código del tipo de DTE
+     * @param array $datos Datos del documento
+     * @return string XML del sobre firmado
      */
     public function generarXml(int $tipoDte, array $datos): string
     {
@@ -165,6 +182,10 @@ class SiiClient
      *   $pdf->setPaper('letter', 'portrait');
      *   $pdf->render();
      *   file_put_contents('factura.pdf', $pdf->output());
+     *
+     * @param string $xmlFirmado XML del sobre firmado
+     * @param array $opciones Opciones de visualización (logo, colores, etc.)
+     * @return string HTML generado
      */
     public function generarHtmlPdf(string $xmlFirmado, array $opciones = []): string
     {
@@ -179,8 +200,13 @@ class SiiClient
      * El SII puede tardar de 2 a 15 minutos en procesar.
      *
      * Códigos de estado:
-     *   EPR = Procesado correctamente   RSC = Rechazado
-     *   SOK = Recibido, en proceso      DNK = No encontrado aún
+     *   EPR = Procesado correctamente
+     *   RSC = Rechazado
+     *   SOK = Recibido, en proceso
+     *   DNK = No encontrado aún
+     *
+     * @param string $trackId ID de seguimiento del envío
+     * @return array Resultado de la consulta al SII
      */
     public function consultarEstado(string $trackId): array
     {
@@ -204,6 +230,9 @@ class SiiClient
      * Procesa todos los DTE pendientes y actualiza su estado.
      * Llama desde un cron job cada 15 minutos.
      * Requiere DteRepository inyectado.
+     *
+     * @return array Resumen de resultados del procesamiento
+     * @throws SiiException Si no se ha inyectado el repositorio
      */
     public function procesarPendientes(): array
     {
@@ -225,6 +254,14 @@ class SiiClient
 
     /**
      * Consulta si un DTE específico fue aceptado por el SII.
+     *
+     * @param string $rutReceptor RUT del receptor sin DV
+     * @param string $dvReceptor Dígito verificador del receptor
+     * @param int $tipoDte Código del tipo de DTE
+     * @param int $folio Número de folio del documento
+     * @param string $fechaEmision Fecha de emisión (AAAA-MM-DD)
+     * @param int $montoPesos Monto total del documento en pesos
+     * @return array Resultado de la consulta puntual
      */
     public function consultarDte(string $rutReceptor, string $dvReceptor, int $tipoDte, int $folio, string $fechaEmision, int $montoPesos): array
     {
@@ -241,12 +278,23 @@ class SiiClient
         );
     }
 
-    /** Obtiene o renueva el token de sesión SII. */
+    /**
+     * Obtiene o renueva el token de sesión SII.
+     *
+     * @return string Token de sesión vigente
+     */
     public function getToken(): string
     {
         return $this->tokenManager->getToken($this->config['rut_emisor'], $this->config['dv_emisor']);
     }
 
+    /**
+     * Valida la configuración inicial del cliente.
+     *
+     * @param array $config Datos de configuración
+     * @throws SiiException Si falta algún parámetro obligatorio
+     * @return void
+     */
     private function validateConfig(array $config): void
     {
         foreach (['rut_emisor', 'dv_emisor', 'razon_social', 'giro', 'direccion', 'ciudad', 'ambiente'] as $key) {

@@ -44,6 +44,7 @@ class SiiWebService
      * @param string $xmlFirmado   XML del sobre firmado
      * @param string $token        Token de sesión SII
      * @return string              Track ID del envío
+     * @throws SiiException        Si el ambiente no es válido o el SII rechaza el envío
      */
     public function uploadDte(string $rut, string $dv, string $xmlFirmado, string $token): string
     {
@@ -83,7 +84,12 @@ class SiiWebService
     /**
      * Consulta el estado de un envío por Track ID.
      *
-     * @return array ['estado' => ..., 'glosa' => ..., 'detalle' => ...]
+     * @param string $rut Cuerpo del RUT del emisor
+     * @param string $dv Dígito verificador del emisor
+     * @param string $trackId ID de seguimiento retornado por el SII
+     * @param string $token Token de sesión vigente
+     * @return array Mapa con el estado, glosa y detalle de la respuesta
+     * @throws SiiException Si el ambiente no es válido
      */
     public function getStatus(string $rut, string $dv, string $trackId, string $token): array
     {
@@ -109,7 +115,17 @@ class SiiWebService
     /**
      * Consulta si un DTE específico fue recibido y aceptado por el SII.
      *
-     * @return array ['estado' => ..., 'glosa' => ...]
+     * @param string $rutEmisor RUT del emisor
+     * @param string $dvEmisor Dígito verificador del emisor
+     * @param string $rutReceptor RUT del receptor
+     * @param string $dvReceptor Dígito verificador del receptor
+     * @param int $tipoDte Código del tipo de DTE
+     * @param int $folio Número de folio del documento
+     * @param string $fechaEmision Fecha de emisión (AAAA-MM-DD)
+     * @param int $montoPesos Monto total del documento
+     * @param string $token Token de sesión vigente
+     * @return array Resultado de la consulta puntual
+     * @throws SiiException Si el ambiente no es válido
      */
     public function queryDte(
         string $rutEmisor,
@@ -145,6 +161,12 @@ class SiiWebService
     }
 
 
+    /**
+     * Parsea la respuesta XML del estado de envío.
+     *
+     * @param string $response Respuesta XML del SII
+     * @return array Datos estructurados del estado
+     */
     private function parseEstadoResponse(string $response): array
     {
         $estado = '';
@@ -183,6 +205,12 @@ class SiiWebService
         ];
     }
 
+    /**
+     * Envuelve el cuerpo del mensaje en un sobre SOAP 1.1.
+     *
+     * @param string $body Cuerpo del mensaje XML
+     * @return string Mensaje SOAP completo
+     */
     private function wrapSoap(string $body): string
     {
         return '<?xml version="1.0" encoding="UTF-8"?>'
@@ -191,6 +219,15 @@ class SiiWebService
             . '</soapenv:Envelope>';
     }
 
+    /**
+     * Realiza una petición HTTP POST usando cURL.
+     *
+     * @param string $url URL de destino
+     * @param string $body Cuerpo del POST
+     * @param array $headers Lista de cabeceras HTTP
+     * @return string Cuerpo de la respuesta
+     * @throws SiiException Si ocurre un error de conexión o el servidor responde error
+     */
     private function httpPost(string $url, string $body, array $headers): string
     {
         $ch = curl_init($url);

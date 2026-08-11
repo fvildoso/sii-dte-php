@@ -49,37 +49,77 @@ class DteTypes
         112 => ['nombre' => 'Nota de Crédito de Exportación',   'iva' => false, 'exportacion' => true,  'traslado' => false, 'boleta' => false],
     ];
 
+    /**
+     * Obtiene el nombre legible del tipo de DTE.
+     *
+     * @param int $tipo Código del tipo de DTE
+     * @return string Nombre del documento
+     */
     public static function getName(int $tipo): string
     {
         return self::META[$tipo]['nombre'] ?? "DTE Tipo {$tipo}";
     }
 
+    /**
+     * Indica si al tipo de DTE se le aplica IVA.
+     *
+     * @param int $tipo Código del tipo de DTE
+     * @return bool True si aplica IVA
+     */
     public static function aplicaIva(int $tipo): bool
     {
         return self::META[$tipo]['iva'] ?? false;
     }
 
+    /**
+     * Indica si el DTE es de exportación.
+     *
+     * @param int $tipo Código del tipo de DTE
+     * @return bool True si es de exportación
+     */
     public static function esExportacion(int $tipo): bool
     {
         return self::META[$tipo]['exportacion'] ?? false;
     }
 
+    /**
+     * Indica si el DTE es para traslado de mercaderías.
+     *
+     * @param int $tipo Código del tipo de DTE
+     * @return bool True si es de traslado
+     */
     public static function esTraslado(int $tipo): bool
     {
         return self::META[$tipo]['traslado'] ?? false;
     }
 
+    /**
+     * Indica si el DTE es una boleta.
+     *
+     * @param int $tipo Código del tipo de DTE
+     * @return bool True si es una boleta
+     */
     public static function esBoleta(int $tipo): bool
     {
         return self::META[$tipo]['boleta'] ?? false;
     }
 
-    /** Indica si el tipo requiere datos de referencia a otro DTE */
+    /**
+     * Indica si el tipo requiere datos de referencia a otro DTE.
+     *
+     * @param int $tipo Código del tipo de DTE
+     * @return bool True si requiere referencia
+     */
     public static function requiereReferencia(int $tipo): bool
     {
         return in_array($tipo, [56, 61, 111, 112]);
     }
 
+    /**
+     * Retorna todos los códigos de tipo de DTE soportados.
+     *
+     * @return array Lista de códigos numéricos
+     */
     public static function todos(): array
     {
         return array_keys(self::META);

@@ -75,8 +75,9 @@ class DteRepository
      * Actualiza el estado de un DTE después de consultar al SII.
      *
      * @param string $trackId    Track ID del envío
-     * @param string $estado     'aceptado' | 'rechazado' | 'pendiente'
-     * @param string $glosa      Mensaje del SII
+     * @param string $estado     Estado a asignar ('aceptado', 'rechazado' o 'pendiente')
+     * @param string $glosa      Mensaje o glosa entregada por el SII
+     * @return void
      */
     public function actualizarEstado(string $trackId, string $estado, string $glosa = ''): void
     {
@@ -90,6 +91,10 @@ class DteRepository
     /**
      * Guarda el PDF generado como bytes en la BD (opcional).
      * Si prefieres guardar en disco/S3, no uses este método.
+     *
+     * @param int $id ID del registro del DTE
+     * @param string $pdfBytes Contenido del archivo PDF en bytes
+     * @return void
      */
     public function guardarPdf(int $id, string $pdfBytes): void
     {
@@ -100,6 +105,9 @@ class DteRepository
 
     /**
      * Busca DTE por Track ID.
+     *
+     * @param string $trackId Track ID asignado por el SII
+     * @return array|null Datos del DTE o null si no se encuentra
      */
     public function porTrackId(string $trackId): ?array
     {
@@ -112,6 +120,11 @@ class DteRepository
 
     /**
      * Busca DTE por tipo y folio.
+     *
+     * @param int $tipoDte Código del tipo de DTE
+     * @param int $folio Número de folio del documento
+     * @param string $rutEmisor RUT del emisor
+     * @return array|null Datos del DTE o null si no se encuentra
      */
     public function porFolio(int $tipoDte, int $folio, string $rutEmisor): ?array
     {
@@ -126,6 +139,9 @@ class DteRepository
 
     /**
      * Retorna DTE pendientes de confirmación (para el cron de actualización).
+     *
+     * @param int $limite Cantidad máxima de registros a retornar
+     * @return array Lista de documentos pendientes
      */
     public function pendientes(int $limite = 50): array
     {

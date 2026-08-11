@@ -25,6 +25,10 @@ class XmlSigner
 
     /**
      * Firma el XML de un DTE individual.
+     *
+     * @param string $xml XML del DTE a firmar
+     * @return string XML firmado
+     * @throws SiiException Si el XML es inválido o falta el nodo Documento
      */
     public function signDte(string $xml): string
     {
@@ -77,6 +81,10 @@ class XmlSigner
 
     /**
      * Firma el sobre EnvioDTE completo.
+     *
+     * @param string $xml XML del sobre a firmar
+     * @return string XML del sobre firmado
+     * @throws SiiException Si el XML es inválido o falta el nodo SetDTE
      */
     public function signEnvelope(string $xml): string
     {
@@ -116,6 +124,9 @@ class XmlSigner
 
     /**
      * Genera el GetTokenRequest firmado (para autenticación con el SII).
+     *
+     * @param string $seed Semilla obtenida del SII
+     * @return string XML de solicitud de token firmado
      */
     public function signTokenRequest(string $seed): string
     {
@@ -148,12 +159,24 @@ class XmlSigner
         return $signed;
     }
 
+    /**
+     * Obtiene los datos del certificado en base64.
+     *
+     * @return string Certificado en base64
+     */
     public function getCertData(): string
     {
         return $this->certData;
     }
 
 
+    /**
+     * Construye el nodo SignedInfo para la firma XML.
+     *
+     * @param string $uri URI del elemento a firmar
+     * @param string $digest Valor digest SHA1 en base64
+     * @return string Fragmento XML de SignedInfo
+     */
     private function buildSignedInfo(string $uri, string $digest): string
     {
         return '<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">'
@@ -169,6 +192,14 @@ class XmlSigner
             . '</SignedInfo>';
     }
 
+    /**
+     * Construye el bloque Signature completo.
+     *
+     * @param string $signedInfo XML de SignedInfo
+     * @param string $signatureValue Valor de la firma en base64
+     * @param string $uri URI del elemento firmado
+     * @return string Bloque XML Signature
+     */
     private function buildSignatureBlock(string $signedInfo, string $signatureValue, string $uri): string
     {
         return '<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">'
@@ -181,6 +212,12 @@ class XmlSigner
             . '</Signature>';
     }
 
+    /**
+     * Canonicaliza un fragmento XML usando C14N.
+     *
+     * @param string $xmlFragment Fragmento XML
+     * @return string Fragmento canonicalizado
+     */
     private function canonicalizeString(string $xmlFragment): string
     {
         $doc = new DOMDocument();
@@ -188,6 +225,14 @@ class XmlSigner
         return $doc->documentElement->C14N();
     }
 
+    /**
+     * Carga el certificado digital y la clave privada.
+     *
+     * @param string $certPath Ruta al archivo del certificado
+     * @param string $certPassword Contraseña del certificado
+     * @throws SiiException Si no se puede leer o cargar el certificado
+     * @return void
+     */
     private function loadCertificate(string $certPath, string $certPassword): void
     {
         $certContent = file_get_contents($certPath);
@@ -221,6 +266,12 @@ class XmlSigner
         throw new SiiException('No se pudo cargar el certificado. Verifique el archivo y la contraseña.');
     }
 
+    /**
+     * Limpia las cabeceras PEM de un certificado para obtener solo el base64.
+     *
+     * @param string $pem Certificado en formato PEM
+     * @return string Base64 limpio
+     */
     private function cleanCert(string $pem): string
     {
         $pem = preg_replace('/-----BEGIN CERTIFICATE-----/', '', $pem);

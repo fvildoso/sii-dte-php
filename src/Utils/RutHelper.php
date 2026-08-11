@@ -10,7 +10,11 @@ namespace SiiDte\Utils;
 class RutHelper
 {
     /**
-     * Formatea RUT en la forma "12345678-9".
+     * Formatea el RUT en la forma estándar "12345678-9".
+     *
+     * @param string $rut Cuerpo del RUT
+     * @param string $dv Dígito verificador
+     * @return string RUT formateado
      */
     public static function format(string $rut, string $dv): string
     {
@@ -21,6 +25,9 @@ class RutHelper
     /**
      * Valida un RUT chileno completo (con DV).
      * Acepta formatos: "12345678-9", "123456789", "12.345.678-9"
+     *
+     * @param string $rut RUT completo a validar
+     * @return bool True si el RUT es válido
      */
     public static function validate(string $rut): bool
     {
@@ -39,6 +46,9 @@ class RutHelper
 
     /**
      * Calcula el dígito verificador de un RUT.
+     *
+     * @param int $rut Cuerpo del RUT
+     * @return string Dígito verificador calculado
      */
     public static function calcularDv(int $rut): string
     {
@@ -63,8 +73,10 @@ class RutHelper
     }
 
     /**
-     * Separa un RUT completo en número y DV.
-     * @return array{rut: string, dv: string}
+     * Separa un RUT completo en cuerpo y dígito verificador.
+     *
+     * @param string $rut RUT completo
+     * @return array{rut: string, dv: string} Arreglo con las partes del RUT
      */
     public static function parse(string $rut): array
     {

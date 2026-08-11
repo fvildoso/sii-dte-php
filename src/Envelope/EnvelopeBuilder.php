@@ -17,8 +17,9 @@ class EnvelopeBuilder
      * Construye el XML del sobre EnvioDTE.
      *
      * @param string $dteFirmadoXml XML del DTE ya firmado
-     * @param array  $emisor        Config del emisor
+     * @param array  $emisor        Configuración del emisor
      * @param array  $receptor      Datos del receptor
+     * @return string XML del sobre generado
      */
     public static function build(string $dteFirmadoXml, array $emisor, array $receptor): string
     {
@@ -59,6 +60,12 @@ class EnvelopeBuilder
         return $xml;
     }
 
+    /**
+     * Extrae el tipo de DTE desde el XML.
+     *
+     * @param string $xml XML del DTE
+     * @return string Código del tipo de DTE
+     */
     private static function extractTipoDte(string $xml): string
     {
         if (preg_match('/<TipoDTE>(\d+)<\/TipoDTE>/', $xml, $m)) {

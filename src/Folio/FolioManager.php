@@ -163,7 +163,10 @@ class FolioManager
     }
 
     /**
-     * Devuelve cuántos folios quedan disponibles para un tipo de DTE.
+     * Obtiene la cantidad de folios que quedan por utilizar para un tipo de DTE.
+     *
+     * @param int $tipoDte Código del tipo de DTE
+     * @return int Cantidad de folios disponibles
      */
     public function foliosDisponibles(int $tipoDte): int
     {
@@ -179,11 +182,15 @@ class FolioManager
     }
 
     /**
-     * Marca un folio como anulado (cuando el DTE fue rechazado por el SII
-     * y no se puede volver a usar ese número de folio).
+     * Registra un folio como anulado en la base de datos.
      *
      * IMPORTANTE: En la práctica, los folios rechazados por el SII se pierden.
      * No se pueden reutilizar. Esta función los registra para auditoría.
+     *
+     * @param int $tipoDte Código del tipo de DTE
+     * @param int $folio Número de folio a anular
+     * @param string $motivo Razón de la anulación
+     * @return void
      */
     public function anularFolio(int $tipoDte, int $folio, string $motivo = ''): void
     {
@@ -198,6 +205,9 @@ class FolioManager
     /**
      * Retorna los CAF y su estado de llenado.
      * Útil para dashboards de administración.
+     *
+     * @param int|null $tipoDte Código del tipo de DTE (opcional)
+     * @return array Resumen de rangos y disponibilidad
      */
     public function estadoCafs(int $tipoDte = null): array
     {
@@ -220,7 +230,11 @@ class FolioManager
     // Métodos privados
 
     /**
-     * Parsea el XML del CAF y extrae los valores clave.
+     * Parsea el XML de un CAF para extraer sus metadatos.
+     *
+     * @param string $cafXml Contenido XML del CAF
+     * @return array Metadatos extraídos del CAF
+     * @throws SiiException Si el XML es inválido o no contiene los nodos requeridos
      */
     private function parseCaf(string $cafXml): array
     {
