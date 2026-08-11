@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 use SiiDte\Utils\RutHelper;
 
 /**
- * Pruebas para la utilidad de validación y formateo de RUT.
+ * Pruebas para la utilidad de validación y formateo de RUT chileno.
  */
 class RutHelperTest extends TestCase
 {
@@ -17,9 +17,9 @@ class RutHelperTest extends TestCase
      */
     public function testValidaRutCorrecto(): void
     {
-        $this->assertTrue(RutHelper::validate('12345678-9'));
+        $this->assertTrue(RutHelper::validate('12345678-5'));
         $this->assertTrue(RutHelper::validate('76354771-K'));
-        $this->assertTrue(RutHelper::validate('11.222.333-4'));
+        $this->assertTrue(RutHelper::validate('11.222.333-9'));
     }
 
     /**
@@ -28,7 +28,7 @@ class RutHelperTest extends TestCase
     public function testRechazaRutIncorrecto(): void
     {
         $this->assertFalse(RutHelper::validate('12345678-0'));
-        $this->assertFalse(RutHelper::validate('11111111-1'));
+        $this->assertFalse(RutHelper::validate('11.222.333-0'));
     }
 
     /**
@@ -36,7 +36,7 @@ class RutHelperTest extends TestCase
      */
     public function testCalculaDv(): void
     {
-        $this->assertSame('9', RutHelper::calcularDv(12345678));
+        $this->assertSame('5', RutHelper::calcularDv(12345678));
         $this->assertSame('K', RutHelper::calcularDv(76354771));
     }
 
@@ -45,7 +45,7 @@ class RutHelperTest extends TestCase
      */
     public function testFormatea(): void
     {
-        $this->assertSame('12345678-9', RutHelper::format('12345678', '9'));
+        $this->assertSame('12345678-5', RutHelper::format('12345678', '5'));
     }
 
     /**
@@ -53,8 +53,8 @@ class RutHelperTest extends TestCase
      */
     public function testParsea(): void
     {
-        $parsed = RutHelper::parse('12345678-9');
+        $parsed = RutHelper::parse('12345678-5');
         $this->assertSame('12345678', $parsed['rut']);
-        $this->assertSame('9', $parsed['dv']);
+        $this->assertSame('5', $parsed['dv']);
     }
 }
