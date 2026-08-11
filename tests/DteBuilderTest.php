@@ -8,10 +8,18 @@ use PHPUnit\Framework\TestCase;
 use SiiDte\Document\DteBuilder;
 use SiiDte\Document\DteTypes;
 
+/**
+ * Pruebas para el constructor de XML de DTE.
+ */
 class DteBuilderTest extends TestCase
 {
     private array $config;
 
+    /**
+     * Configura el entorno de pruebas.
+     *
+     * @return void
+     */
     protected function setUp(): void
     {
         $this->config = [
@@ -29,6 +37,11 @@ class DteBuilderTest extends TestCase
         ];
     }
 
+    /**
+     * Verifica que el XML generado contenga los datos básicos y la estructura correcta.
+     *
+     * @return void
+     */
     public function testBuildGeneraXmlValido(): void
     {
         $builder = new DteBuilder($this->config);
@@ -63,6 +76,11 @@ class DteBuilderTest extends TestCase
         $this->assertStringContainsString('Producto A', $xml);
     }
 
+    /**
+     * Verifica que los montos totales e impuestos se calculen correctamente.
+     *
+     * @return void
+     */
     public function testCalculaTotalesConIva(): void
     {
         $builder = new DteBuilder($this->config);
@@ -89,6 +107,11 @@ class DteBuilderTest extends TestCase
         $this->assertStringContainsString('<MntTotal>119000</MntTotal>', $xml);
     }
 
+    /**
+     * Verifica que se lance una excepción si no hay líneas de detalle.
+     *
+     * @return void
+     */
     public function testLanzaExcepcionSinDetalle(): void
     {
         $builder = new DteBuilder($this->config);
@@ -103,6 +126,11 @@ class DteBuilderTest extends TestCase
         ]);
     }
 
+    /**
+     * Verifica el comportamiento de los tipos de documentos no afectos a IVA.
+     *
+     * @return void
+     */
     public function testTiposNoAfectos(): void
     {
         $this->assertFalse(DteTypes::aplicaIva(DteTypes::FACTURA_NO_AFECTA_ELECTRONICA));
