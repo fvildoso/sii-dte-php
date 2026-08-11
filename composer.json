@@ -1,0 +1,56 @@
+{
+  "name": "fvildoso/sii-dte-php",
+  "description": "Librería PHP para integración con DTE (Documentos Tributarios Electrónicos) del SII de Chile",
+  "type": "library",
+  "license": "MIT",
+  "keywords": [
+    "sii",
+    "dte",
+    "chile",
+    "factura",
+    "electronica",
+    "boleta"
+  ],
+  "homepage": "https://github.com/fvildoso/sii-dte-php",
+  "authors": [
+    {
+      "name": "Felipe E. Vildoso Castillo",
+      "email": "fvildoso@ing.uchile.cl"
+    }
+  ],
+  "require": {
+    "php": ">=8.0",
+    "ext-soap": "*",
+    "ext-openssl": "*",
+    "ext-dom": "*",
+    "ext-libxml": "*",
+    "ext-curl": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.0",
+    "friendsofphp/php-cs-fixer": "^3.0",
+    "phpstan/phpstan": "^1.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "SiiDte\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "SiiDte\\Tests\\": "tests/"
+    }
+  },
+  "scripts": {
+    "lint": "php-cs-fixer fix --dry-run --diff",
+    "fix": "php-cs-fixer fix",
+    "stan": "phpstan analyse src --level=6",
+    "test": "phpunit --testdox",
+    "check": [
+      "@lint",
+      "@stan",
+      "@test"
+    ]
+  },
+  "minimum-stability": "stable"
+}

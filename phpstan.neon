@@ -1,0 +1,8 @@
+parameters:
+    level: 6
+    paths:
+        - src
+    ignoreErrors:
+        # openssl_pkcs12_read llena $certs por referencia, PHPStan no lo entiende bien
+        - '#Variable \$certs might not be defined#'
+    checkMissingIterableValueType: false

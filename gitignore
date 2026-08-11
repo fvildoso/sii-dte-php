@@ -1,0 +1,33 @@
+# Composer
+/vendor/
+composer.lock
+
+# Linter cache
+.php-cs-fixer.cache
+
+# PHPUnit
+/coverage/
+
+# Certificados — NUNCA en el repo
+*.p12
+*.pfx
+*.pem
+*.crt
+*.key
+
+# Variables de entorno
+.env
+.env.local
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output de ejemplos
+/examples/output/
+/examples/certs/
