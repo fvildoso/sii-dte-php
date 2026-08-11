@@ -10,41 +10,29 @@ namespace SiiDte\Document;
  */
 class DteTypes
 {
-    // -------------------------------------------------------------------------
     // Documentos de Venta (Emisor vende / presta servicio)
-    // -------------------------------------------------------------------------
     public const FACTURA_ELECTRONICA              = 33;  // Afecta a IVA
     public const FACTURA_NO_AFECTA_ELECTRONICA    = 34;  // Exenta de IVA
     public const LIQUIDACION_FACTURA_ELECTRONICA  = 43;  // Para mandatarios/comisionistas
     public const BOLETA_ELECTRONICA               = 39;  // Consumidor final, afecta IVA
     public const BOLETA_NO_AFECTA_ELECTRONICA     = 41;  // Consumidor final, exenta IVA
 
-    // -------------------------------------------------------------------------
     // Documentos de Compra (Emisor compra / receptor es vendedor)
-    // -------------------------------------------------------------------------
     public const FACTURA_COMPRA_ELECTRONICA       = 46;  // Retención IVA por comprador
 
-    // -------------------------------------------------------------------------
     // Documentos de Traslado
-    // -------------------------------------------------------------------------
     public const GUIA_DESPACHO_ELECTRONICA        = 52;  // Acompañar mercadería en traslado
 
-    // -------------------------------------------------------------------------
     // Documentos de Ajuste
-    // -------------------------------------------------------------------------
     public const NOTA_DEBITO_ELECTRONICA          = 56;  // Aumenta monto de factura original
     public const NOTA_CREDITO_ELECTRONICA         = 61;  // Disminuye monto / anula factura
 
-    // -------------------------------------------------------------------------
     // Documentos de Exportación
-    // -------------------------------------------------------------------------
     public const FACTURA_EXPORTACION_ELECTRONICA  = 110; // Exportación definitiva
     public const NOTA_DEBITO_EXPORTACION          = 111; // Ajuste exportación (aumento)
     public const NOTA_CREDITO_EXPORTACION         = 112; // Ajuste exportación (disminución)
 
-    // -------------------------------------------------------------------------
     // Metadatos por tipo
-    // -------------------------------------------------------------------------
 
     private const META = [
         33  => ['nombre' => 'Factura Electrónica',              'iva' => true,  'exportacion' => false, 'traslado' => false, 'boleta' => false],

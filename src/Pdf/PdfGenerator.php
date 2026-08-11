@@ -149,7 +149,6 @@ class PdfGenerator
         return $this->renderHtml($datos, $opciones);
     }
 
-    // -------------------------------------------------------------------------
 
     private function parseXml(string $xml): array
     {

@@ -76,9 +76,7 @@ class SiiClient
         return $this;
     }
 
-    // =========================================================================
-    // EMISIÓN
-    // =========================================================================
+    // Emisión
 
     /**
      * Genera, firma y envía un DTE al SII.
@@ -89,7 +87,6 @@ class SiiClient
      */
     public function enviarDte(int $tipoDte, array $datos): array
     {
-        // 1. Asignar folio automáticamente si hay FolioManager
         if ($this->folioManager !== null && empty($datos['folio'])) {
             $folioData      = $this->folioManager->siguienteFolio($tipoDte);
             $datos['folio'] = $folioData['folio'];
@@ -100,17 +97,13 @@ class SiiClient
             );
         }
 
-        // 2. Generar XML
         $dteXml = $this->builder->build($tipoDte, $datos);
 
-        // 3. Firmar DTE
         $dteFirmado = $this->signer->signDte($dteXml);
 
-        // 4. Construir y firmar sobre EnvioDTE
         $envioXml     = EnvelopeBuilder::build($dteFirmado, $this->config, $datos['receptor']);
         $envioFirmado = $this->signer->signEnvelope($envioXml);
 
-        // 5. Enviar al SII
         $token   = $this->getToken();
         $trackId = $this->webService->uploadDte(
             $this->config['rut_emisor'],
@@ -119,7 +112,6 @@ class SiiClient
             $token
         );
 
-        // 6. Persistir en BD
         $dteId   = null;
         $totales = $this->builder->calcularTotales($tipoDte, $datos['detalle']);
         if ($this->dteRepository !== null) {
@@ -180,9 +172,7 @@ class SiiClient
         return $gen->toHtml($xmlFirmado, $opciones);
     }
 
-    // =========================================================================
-    // CONSULTAS
-    // =========================================================================
+    // Consulta y procesamiento
 
     /**
      * Consulta el estado de un envío por Track ID.

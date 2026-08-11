@@ -153,7 +153,6 @@ class XmlSigner
         return $this->certData;
     }
 
-    // -------------------------------------------------------------------------
 
     private function buildSignedInfo(string $uri, string $digest): string
     {

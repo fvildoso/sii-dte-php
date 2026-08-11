@@ -173,18 +173,15 @@ class CertificateStore
         return $info['dias_vigencia'] < $dias;
     }
 
-    // -------------------------------------------------------------------------
 
     private function __construct() {}
 
     private function validate(): void
     {
-        // 1. El archivo existe
         if (!file_exists($this->certPath)) {
             throw new SiiException("Certificado no encontrado en: {$this->certPath}");
         }
 
-        // 2. Es legible
         if (!is_readable($this->certPath)) {
             throw new SiiException(
                 "El certificado no tiene permisos de lectura: {$this->certPath}\n"
@@ -192,7 +189,7 @@ class CertificateStore
             );
         }
 
-        // 3. Advertencia si está en una ruta pública común
+        // Advertencia si está en una ruta pública común
         $publicPaths = ['/public/', '/www/', '/html/', '/htdocs/', '/webroot/'];
         foreach ($publicPaths as $pub) {
             if (str_contains($this->certPath, $pub)) {
@@ -203,7 +200,6 @@ class CertificateStore
             }
         }
 
-        // 4. La contraseña es correcta y el archivo es un PKCS12 válido
         $content = file_get_contents($this->certPath);
         if (!openssl_pkcs12_read($content, $certs, $this->certPassword)) {
             throw new SiiException(
@@ -214,7 +210,6 @@ class CertificateStore
             );
         }
 
-        // 5. No está vencido
         $certInfo = openssl_x509_parse($certs['cert']);
         if (time() > ($certInfo['validTo_time_t'] ?? 0)) {
             $vencio = date('Y-m-d', $certInfo['validTo_time_t']);

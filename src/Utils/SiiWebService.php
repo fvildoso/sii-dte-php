@@ -144,7 +144,6 @@ class SiiWebService
         return $this->parseEstadoResponse($response);
     }
 
-    // -------------------------------------------------------------------------
 
     private function parseEstadoResponse(string $response): array
     {

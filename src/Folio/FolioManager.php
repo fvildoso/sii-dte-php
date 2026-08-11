@@ -217,9 +217,7 @@ class FolioManager
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    // -------------------------------------------------------------------------
-    // Privados
-    // -------------------------------------------------------------------------
+    // Métodos privados
 
     /**
      * Parsea el XML del CAF y extrae los valores clave.
