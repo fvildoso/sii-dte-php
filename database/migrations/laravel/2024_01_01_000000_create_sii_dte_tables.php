@@ -12,8 +12,7 @@ use Illuminate\Support\Facades\Schema;
  * Ejecutar con:
  *   php artisan migrate
  */
-return new class extends Migration
-{
+return new class extends Migration {
     public function up(): void
     {
         // ── CAF (Códigos de Autorización de Folios) ──────────────────────────
