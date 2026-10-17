@@ -114,7 +114,7 @@ class CertificateStore
         $tmpPath = sys_get_temp_dir() . '/sii_cert_' . md5($b64) . '.p12';
         if (!file_exists($tmpPath)) {
             file_put_contents($tmpPath, $certContent);
-            chmod($tmpPath, 0600);
+            chmod($tmpPath, 0o600);
         }
 
         $store = new self();

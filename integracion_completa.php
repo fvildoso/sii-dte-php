@@ -143,7 +143,7 @@ try {
     $xmlFirmado = $resultado['xml'];
 
     // Opcional: guardar el XML en disco
-    @mkdir(__DIR__ . '/output', 0755, true);
+    @mkdir(__DIR__ . '/output', 0o755, true);
     file_put_contents(__DIR__ . "/output/factura_{$resultado['folio']}.xml", $xmlFirmado);
 
     // Generar HTML para PDF
