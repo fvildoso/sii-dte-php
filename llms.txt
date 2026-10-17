@@ -1,0 +1,110 @@
+# SII DTE PHP
+
+> Librería PHP 8.4+ para integración y emisión de Documentos Tributarios Electrónicos (DTE) con el Servicio de Impuestos Internos (SII) de Chile.
+
+## Resumen de Integración Rápida
+
+- Namespace base: `SiiDte\`
+- Cliente principal: `SiiDte\SiiClient`
+- Constantes de DTE: `SiiDte\Document\DteTypes`
+- Certificados: `SiiDte\Storage\CertificateStore`
+- Gestión de folios/CAF: `SiiDte\Folio\FolioManager`
+- Persistencia en BD: `SiiDte\Storage\DteRepository`
+
+## Inicialización Canónica
+
+```php
+use SiiDte\SiiClient;
+use SiiDte\Folio\FolioManager;
+use SiiDte\Storage\CertificateStore;
+use SiiDte\Storage\DteRepository;
+
+// 1. Cargar certificado
+$certStore = CertificateStore::fromFile('/ruta/segura/certificado.p12', getenv('SII_CERT_PASS'));
+// O alternativamente:
+// $certStore = CertificateStore::fromEnv('SII_CERT_B64', 'SII_CERT_PASS');
+
+// 2. Configurar cliente
+$client = new SiiClient([
+    'rut_emisor'        => '76123456',
+    'dv_emisor'         => '0',
+    'razon_social'      => 'Mi Empresa SpA',
+    'giro'              => 'Servicios Informáticos',
+    'direccion'         => 'Av. Providencia 1234, Of. 501',
+    'ciudad'            => 'Santiago',
+    'codigo_actividad'  => '620200',
+    'numero_resolucion' => 0,              // 0 en certificación
+    'fecha_resolucion'  => '2019-10-18',
+    'ambiente'          => 'certificacion', // 'certificacion' o 'produccion'
+], $certStore);
+
+// 3. Vincular componentes opcionales con BD (PDO)
+$pdo = new PDO($dsn, $user, $pass);
+$client->usarFolioManager(new FolioManager($pdo))
+       ->usarRepositorio(new DteRepository($pdo));
+```
+
+O inicialización rápida desde variables de entorno:
+```php
+$client = SiiClient::fromEnv();
+```
+
+## Emisión de DTE (Ejemplo Factura Electrónica tipo 33)
+
+```php
+use SiiDte\Document\DteTypes;
+
+$resultado = $client->enviarDte(DteTypes::FACTURA_ELECTRONICA, [
+    'fecha'    => date('Y-m-d'),
+    'receptor' => [
+        'rut'          => '77987654',
+        'dv'           => '3',
+        'razon_social' => 'Cliente SpA',
+        'giro'         => 'Comercio General',
+        'direccion'    => 'Av. Las Condes 567',
+        'ciudad'       => 'Santiago',
+    ],
+    'detalle' => [
+        [
+            'codigo'          => 'SERV-01',
+            'nombre'          => 'Servicio de Consultoría',
+            'cantidad'        => 1,
+            'precio_unitario' => 100000, // Precio neto
+        ],
+    ],
+]);
+
+// Retorna:
+// $resultado['trackId'] -> string (Identificador de seguimiento en SII)
+// $resultado['folio']   -> int (Número de folio asignado)
+// $resultado['xml']     -> string (XML firmado enviado al SII)
+// $resultado['dte_id']  -> int|null (ID en tabla sii_dte si se usó repositorio)
+```
+
+## Consulta de Estado
+
+```php
+$estado = $client->consultarEstado($resultado['trackId']);
+// $estado['estado'] => 'EPR' (Aceptado), 'RSC' (Rechazado), 'SOK' (En proceso)
+// $estado['glosa']  => Detalle explicativo retornado por el SII
+```
+
+## Tipos de DTE Comunes (`SiiDte\Document\DteTypes`)
+- `33`: `FACTURA_ELECTRONICA` (Afecta a IVA)
+- `34`: `FACTURA_EXENTA` (Exenta de IVA)
+- `39`: `BOLETA_ELECTRONICA` (Afecta a IVA)
+- `41`: `BOLETA_EXENTA` (Exenta de IVA)
+- `52`: `GUIA_DESPACHO` (Requiere `ind_traslado` en cabecera)
+- `56`: `NOTA_DEBITO` (Requiere nodo `referencias`)
+- `61`: `NOTA_CREDITO` (Requiere nodo `referencias` y `codigo_referencia`)
+
+## Reglas Críticas para Agentes de IA
+1. NUNCA colocar archivos `.p12` o `.pfx` en directorios públicos (p. ej. `public/`, `www/`, `web/`).
+2. En ambiente `'certificacion'`, `numero_resolucion` debe ser `0` y `fecha_resolucion` `2019-10-18`.
+3. Todos los montos en `$datos['detalle']` van como enteros o flotantes sin formato de miles.
+4. Para Notas de Crédito/Débito, siempre incluir el array `referencias` con `tipo_documento`, `folio`, `fecha_documento` y `codigo_referencia` (1: Anula, 2: Corrige texto, 3: Corrige montos).
+5. Las tablas de base de datos necesarias se encuentran en `database/migrations.sql` o adaptadores en `database/migrations/`.
+
+## Enlaces de Referencia
+- Guía completa de estructuras de datos: `estructura_datos.md`
+- Recetas de integración por framework: `recipes/`
