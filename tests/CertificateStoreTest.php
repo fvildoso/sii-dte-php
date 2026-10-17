@@ -151,4 +151,123 @@ class CertificateStoreTest extends TestCase
             }
         }
     }
+
+    public function testRechazaVariablesDeEntornoNoDefinidas(): void
+    {
+        $certVar = 'SII_TEST_CERT_B64_' . strtoupper(bin2hex(random_bytes(4)));
+        $passVar = 'SII_TEST_CERT_PASS_' . strtoupper(bin2hex(random_bytes(4)));
+
+        putenv($certVar);
+        putenv($passVar);
+
+        $this->expectException(SiiException::class);
+
+        CertificateStore::fromEnv($certVar, $passVar);
+    }
+
+    public function testRechazaBase64InvalidoEnVariablesDeEntorno(): void
+    {
+        $certVar = 'SII_TEST_CERT_B64_' . strtoupper(bin2hex(random_bytes(4)));
+        $passVar = 'SII_TEST_CERT_PASS_' . strtoupper(bin2hex(random_bytes(4)));
+
+        putenv($certVar . '=esto-no-es-base64!!!');
+        putenv($passVar . '=password-de-prueba');
+
+        try {
+            $this->expectException(SiiException::class);
+            $this->expectExceptionMessage('no contiene un base64 válido');
+
+            CertificateStore::fromEnv($certVar, $passVar);
+        } finally {
+            putenv($certVar);
+            putenv($passVar);
+        }
+    }
+
+
+    public function testRechazaCertificadoInvalidoEnVariablesDeEntorno(): void
+    {
+        $certVar = 'SII_TEST_CERT_B64_' . strtoupper(bin2hex(random_bytes(4)));
+        $passVar = 'SII_TEST_CERT_PASS_' . strtoupper(bin2hex(random_bytes(4)));
+
+        putenv($certVar . '=' . base64_encode('esto no es un certificado PKCS#12'));
+        putenv($passVar . '=password-de-prueba');
+
+        try {
+            $this->expectException(SiiException::class);
+            $this->expectExceptionMessage('No se pudo abrir el certificado');
+
+            CertificateStore::fromEnv($certVar, $passVar);
+        } finally {
+            putenv($certVar);
+            putenv($passVar);
+        }
+    }
+
+
+    public function testRechazaContrasenaIncorrectaEnVariablesDeEntorno(): void
+    {
+        $privateKey = openssl_pkey_new([
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+            'private_key_bits' => 2048,
+        ]);
+
+        $this->assertNotFalse($privateKey);
+
+        $csr = openssl_csr_new(
+            ['commonName' => 'test.local'],
+            $privateKey
+        );
+
+        $this->assertNotFalse($csr);
+
+        $certificate = openssl_csr_sign($csr, null, $privateKey, 1);
+
+        $this->assertNotFalse($certificate);
+
+        $this->assertTrue(
+            openssl_pkcs12_export(
+                $certificate,
+                $pkcs12,
+                $privateKey,
+                'password-correcta'
+            )
+        );
+
+        $certVar = 'SII_TEST_CERT_B64_' . strtoupper(bin2hex(random_bytes(4)));
+        $passVar = 'SII_TEST_CERT_PASS_' . strtoupper(bin2hex(random_bytes(4)));
+
+        putenv($certVar . '=' . base64_encode($pkcs12));
+        putenv($passVar . '=password-incorrecta');
+
+        try {
+            $this->expectException(SiiException::class);
+            $this->expectExceptionMessage('No se pudo abrir el certificado');
+
+            CertificateStore::fromEnv($certVar, $passVar);
+        } finally {
+            putenv($certVar);
+            putenv($passVar);
+        }
+    }
+
+    public function testRechazaVariablesDeEntornoCuandoFaltaLaContrasena(): void
+    {
+        $certVar = 'SII_TEST_CERT_B64_' . strtoupper(bin2hex(random_bytes(4)));
+        $passVar = 'SII_TEST_CERT_PASS_' . strtoupper(bin2hex(random_bytes(4)));
+
+        putenv($certVar . '=' . base64_encode('contenido-de-prueba'));
+        putenv($passVar);
+
+        try {
+            $this->expectException(SiiException::class);
+            $this->expectExceptionMessage('no están definidas');
+
+            CertificateStore::fromEnv($certVar, $passVar);
+        } finally {
+            putenv($certVar);
+            putenv($passVar);
+        }
+    }
+
 }
