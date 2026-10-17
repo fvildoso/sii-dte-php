@@ -379,4 +379,4 @@ $cert = CertificateStore::fromFile('/public/cert.p12', 'password_hardcodeado');
 
 ## Licencia
 
-MIT © 2024. Ver [LICENSE](LICENSE).
+MIT © 2026. Ver [LICENSE](LICENSE).

@@ -31,3 +31,4 @@ Thumbs.db
 # Output de ejemplos
 /examples/output/
 /examples/certs/
+/.phpunit.result.cache
