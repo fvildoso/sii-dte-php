@@ -11,7 +11,7 @@ permissions:
 jobs:
   tests:
     name: Tests (PHP ${{ matrix.php }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       fail-fast: false
@@ -20,14 +20,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           tools: composer:v2
-          coverage: none
+          coverage: xdebug
 
       - name: Validate Composer configuration
         run: composer validate --strict
