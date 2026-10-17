@@ -10,6 +10,38 @@ use SiiDte\Storage\CertificateStore;
 
 class CertificateStoreTest extends TestCase
 {
+    private static ?string $openSslConfigPath = null;
+
+    public static function setUpBeforeClass(): void
+    {
+        $conf = tempnam(sys_get_temp_dir(), 'sii_ssl_cnf_');
+        if ($conf !== false) {
+            file_put_contents($conf, "[req]\ndistinguished_name = req_distinguished_name\n[req_distinguished_name]\n");
+            self::$openSslConfigPath = $conf;
+        }
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        if (self::$openSslConfigPath !== null && file_exists(self::$openSslConfigPath)) {
+            unlink(self::$openSslConfigPath);
+        }
+    }
+
+    /**
+     * @return array{config?: string, private_key_type: int, private_key_bits: int}
+     */
+    private function getOpenSslArgs(): array
+    {
+        $args = [
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+            'private_key_bits' => 2048,
+        ];
+        if (self::$openSslConfigPath !== null) {
+            $args['config'] = self::$openSslConfigPath;
+        }
+        return $args;
+    }
     public function testRechazaUnCertificadoInexistente(): void
     {
         $path = sys_get_temp_dir()
@@ -48,16 +80,15 @@ class CertificateStoreTest extends TestCase
 
     public function testAceptaUnCertificadoValido(): void
     {
-        $privateKey = openssl_pkey_new([
-            'private_key_type' => OPENSSL_KEYTYPE_RSA,
-            'private_key_bits' => 2048,
-        ]);
+        $privateKey = openssl_pkey_new($this->getOpenSslArgs());
 
         $this->assertNotFalse($privateKey);
 
+        $csrArgs = self::$openSslConfigPath !== null ? ['config' => self::$openSslConfigPath] : [];
         $csr = openssl_csr_new(
             ['commonName' => 'test.local'],
-            $privateKey
+            $privateKey,
+            $csrArgs
         );
 
         $this->assertNotFalse($csr);
@@ -66,7 +97,8 @@ class CertificateStoreTest extends TestCase
             $csr,
             null,
             $privateKey,
-            1
+            1,
+            $csrArgs
         );
 
         $this->assertNotFalse($certificate);
@@ -105,21 +137,20 @@ class CertificateStoreTest extends TestCase
 
     public function testRechazaUnCertificadoConContrasenaIncorrecta(): void
     {
-        $privateKey = openssl_pkey_new([
-            'private_key_type' => OPENSSL_KEYTYPE_RSA,
-            'private_key_bits' => 2048,
-        ]);
+        $privateKey = openssl_pkey_new($this->getOpenSslArgs());
 
         $this->assertNotFalse($privateKey);
 
+        $csrArgs = self::$openSslConfigPath !== null ? ['config' => self::$openSslConfigPath] : [];
         $csr = openssl_csr_new(
             ['commonName' => 'test.local'],
-            $privateKey
+            $privateKey,
+            $csrArgs
         );
 
         $this->assertNotFalse($csr);
 
-        $certificate = openssl_csr_sign($csr, null, $privateKey, 1);
+        $certificate = openssl_csr_sign($csr, null, $privateKey, 1, $csrArgs);
 
         $this->assertNotFalse($certificate);
 
@@ -207,21 +238,20 @@ class CertificateStoreTest extends TestCase
 
     public function testRechazaContrasenaIncorrectaEnVariablesDeEntorno(): void
     {
-        $privateKey = openssl_pkey_new([
-            'private_key_type' => OPENSSL_KEYTYPE_RSA,
-            'private_key_bits' => 2048,
-        ]);
+        $privateKey = openssl_pkey_new($this->getOpenSslArgs());
 
         $this->assertNotFalse($privateKey);
 
+        $csrArgs = self::$openSslConfigPath !== null ? ['config' => self::$openSslConfigPath] : [];
         $csr = openssl_csr_new(
             ['commonName' => 'test.local'],
-            $privateKey
+            $privateKey,
+            $csrArgs
         );
 
         $this->assertNotFalse($csr);
 
-        $certificate = openssl_csr_sign($csr, null, $privateKey, 1);
+        $certificate = openssl_csr_sign($csr, null, $privateKey, 1, $csrArgs);
 
         $this->assertNotFalse($certificate);
 
