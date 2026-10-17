@@ -19,28 +19,67 @@ use SiiDte\Utils\SiiWebService;
 /**
  * Cliente principal para integración con el SII de Chile.
  *
- * ════════════════════════════════════════════════════════════
- *  LO QUE HACE ESTA LIBRERÍA:
- *    ✅ Autenticación SII (semilla → token, renovación automática)
- *    ✅ Generación XML DTE todos los tipos (33,34,39,41,46,52,56,61,110,111,112)
- *    ✅ Cálculo automático de neto, IVA 19% y total
- *    ✅ Firma digital XMLDSig del DTE y del sobre EnvioDTE
- *    ✅ Envío al SII (certificación y producción)
- *    ✅ Consulta de estado por Track ID
- *    ✅ Administración de folios CAF con bloqueo de concurrencia
- *    ✅ Validación del certificado digital (vencimiento, path seguro)
- *    ✅ Persistencia del XML firmado, Track ID y estado en la BD
- *    ✅ Generación de HTML renderizable a PDF
+ * @phpstan-type SiiConfigShape array{
+ *     rut_emisor: string,
+ *     dv_emisor: string,
+ *     razon_social: string,
+ *     giro: string,
+ *     direccion: string,
+ *     ciudad: string,
+ *     codigo_actividad?: string|int,
+ *     telefono?: string,
+ *     email?: string,
+ *     numero_resolucion?: int,
+ *     fecha_resolucion?: string,
+ *     ambiente: 'certificacion'|'produccion'
+ * }
  *
- *  LO QUE DEBE HACER TU APLICACIÓN:
- *    ❌ Ejecutar database/migrations.sql para crear las tablas
- *    ❌ Importar el CAF: FolioManager::importarCaf()
- *    ❌ Alertar cuando los folios estén por agotarse
- *    ❌ Renovar el certificado digital antes de que venza
- *    ❌ Cron de actualización: $client->procesarPendientes()
- *    ❌ Instalar dompdf para generar el PDF final
- *    ❌ Solicitar nuevos CAF al SII cuando se agoten
- * ════════════════════════════════════════════════════════════
+ * @phpstan-type ReceptorShape array{
+ *     rut: string,
+ *     dv: string,
+ *     razon_social?: string,
+ *     giro?: string,
+ *     direccion?: string,
+ *     ciudad?: string,
+ *     contacto?: string,
+ *     correo?: string
+ * }
+ *
+ * @phpstan-type DetalleItemShape array{
+ *     codigo?: string,
+ *     nombre: string,
+ *     descripcion?: string,
+ *     cantidad: int|float,
+ *     unidad_medida?: string,
+ *     precio_unitario: int|float,
+ *     descuento_porcentaje?: int|float,
+ *     descuento_monto?: int|float,
+ *     recargo_porcentaje?: int|float,
+ *     recargo_monto?: int|float,
+ *     exento?: bool
+ * }
+ *
+ * @phpstan-type DteDataShape array{
+ *     fecha: string,
+ *     folio?: int,
+ *     receptor: ReceptorShape,
+ *     detalle: list<DetalleItemShape>|array<int, DetalleItemShape>,
+ *     referencias?: list<array<string, mixed>>|array<int, array<string, mixed>>,
+ *     descuento_global?: array<string, mixed>,
+ *     recargo_global?: array<string, mixed>,
+ *     medio_pago?: string,
+ *     forma_pago?: string,
+ *     observaciones?: string,
+ *     ind_traslado?: int,
+ *     tipo_despacho?: int
+ * }
+ *
+ * @phpstan-type EnvioResultado array{
+ *     trackId: string,
+ *     folio: int,
+ *     xml: string,
+ *     dte_id: int|null
+ * }
  */
 class SiiClient
 {
@@ -48,10 +87,15 @@ class SiiClient
     private XmlSigner     $signer;
     private SiiWebService $webService;
     private DteBuilder    $builder;
+    /** @var SiiConfigShape */
     private array         $config;
     private ?FolioManager  $folioManager  = null;
     private ?DteRepository $dteRepository = null;
 
+    /**
+     * @param SiiConfigShape $config
+     * @param CertificateStore $certStore
+     */
     public function __construct(array $config, CertificateStore $certStore)
     {
         $this->validateConfig($config);
@@ -60,6 +104,65 @@ class SiiClient
         $this->tokenManager = new TokenManager($this->signer, $config['ambiente']);
         $this->webService   = new SiiWebService($config['ambiente']);
         $this->builder      = new DteBuilder($config);
+    }
+
+    /**
+     * Crea e inicializa una instancia de SiiClient a partir de variables de entorno.
+     *
+     * Variables soportadas:
+     * - SII_RUT_EMISOR, SII_DV_EMISOR
+     * - SII_RAZON_SOCIAL, SII_GIRO, SII_DIRECCION, SII_CIUDAD
+     * - SII_CODIGO_ACTIVIDAD, SII_NUMERO_RESOLUCION, SII_FECHA_RESOLUCION
+     * - SII_AMBIENTE ('certificacion' o 'produccion')
+     * - SII_CERT_PATH y SII_CERT_PASS (o SII_CERT_B64 y SII_CERT_PASS)
+     *
+     * @param array<string, mixed> $overrides Valores para sobreescribir las variables de entorno
+     * @return self
+     * @throws SiiException
+     */
+    public static function fromEnv(array $overrides = []): self
+    {
+        $getEnv = static function (string $key, mixed $default = null): mixed {
+            $val = getenv($key);
+            if ($val !== false && $val !== '') {
+                return $val;
+            }
+            if (isset($_ENV[$key]) && $_ENV[$key] !== '') {
+                return $_ENV[$key];
+            }
+            if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') {
+                return $_SERVER[$key];
+            }
+            return $default;
+        };
+
+        $certPass = (string) ($overrides['cert_pass'] ?? $getEnv('SII_CERT_PASS', ''));
+        $certPath = (string) ($overrides['cert_path'] ?? $getEnv('SII_CERT_PATH', ''));
+        $certB64  = (string) ($overrides['cert_b64'] ?? $getEnv('SII_CERT_B64', ''));
+
+        if ($certPath !== '') {
+            $certStore = CertificateStore::fromFile($certPath, $certPass);
+        } elseif ($certB64 !== '') {
+            $certStore = CertificateStore::fromEnv('SII_CERT_B64', 'SII_CERT_PASS');
+        } else {
+            throw new SiiException('No se especificó certificado digital en variables de entorno (SII_CERT_PATH o SII_CERT_B64).');
+        }
+
+        /** @var SiiConfigShape $config */
+        $config = array_merge([
+            'rut_emisor'        => (string) $getEnv('SII_RUT_EMISOR', ''),
+            'dv_emisor'         => (string) $getEnv('SII_DV_EMISOR', ''),
+            'razon_social'      => (string) $getEnv('SII_RAZON_SOCIAL', ''),
+            'giro'              => (string) $getEnv('SII_GIRO', ''),
+            'direccion'         => (string) $getEnv('SII_DIRECCION', ''),
+            'ciudad'            => (string) $getEnv('SII_CIUDAD', ''),
+            'codigo_actividad'  => (string) $getEnv('SII_CODIGO_ACTIVIDAD', '620200'),
+            'numero_resolucion' => (int) $getEnv('SII_NUMERO_RESOLUCION', 0),
+            'fecha_resolucion'  => (string) $getEnv('SII_FECHA_RESOLUCION', '2019-10-18'),
+            'ambiente'          => (string) $getEnv('SII_AMBIENTE', 'certificacion'),
+        ], $overrides);
+
+        return new self($config, $certStore);
     }
 
     /**
@@ -298,7 +401,7 @@ class SiiClient
     private function validateConfig(array $config): void
     {
         foreach (['rut_emisor', 'dv_emisor', 'razon_social', 'giro', 'direccion', 'ciudad', 'ambiente'] as $key) {
-            if (empty($config[$key])) {
+            if (!isset($config[$key]) || trim((string) $config[$key]) === '') {
                 throw new SiiException("Config requerida faltante: '{$key}'");
             }
         }
