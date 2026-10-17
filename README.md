@@ -1,9 +1,13 @@
 # SII DTE PHP
 
-Librería PHP para integración con el **Sistema de Facturación Electrónica (DTE)** del Servicio de Impuestos Internos de Chile.
+Librería PHP para integrar aplicaciones con el sistema de Documentos Tributarios Electrónicos (DTE) del Servicio de
+Impuestos Internos (SII) de Chile.
 
+[![PHP](https://img.shields.io/badge/PHP-8.4%2B-blue.svg)](https://www.php.net/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![PHP](https://img.shields.io/badge/PHP-8.0%2B-blue.svg)](https://php.net)
+[![Packagist Version](https://img.shields.io/packagist/v/fvildoso/sii-dte-php)](https://packagist.org/packages/fvildoso/sii-dte-php)
+[![CI](https://github.com/fvildoso/sii-dte-php/actions/workflows/ci.yml/badge.svg)](https://github.com/fvildoso/sii-dte-php/actions/workflows/ci.yml)
+
 
 ---
 
@@ -11,61 +15,66 @@ Librería PHP para integración con el **Sistema de Facturación Electrónica (D
 
 ### ✅ Se hace cargo la librería
 
-| Función | Clase responsable |
-|---------|------------------|
-| Autenticación con el SII (semilla → token, renovación automática) | `Auth/TokenManager` |
-| Generación del XML DTE (tipos 33, 34, 39, 41, 46, 52, 56, 61, 110, 111, 112) | `Document/DteBuilder` |
-| Cálculo automático de neto, IVA 19% y total | `Document/DteBuilder` |
-| Firma digital XMLDSig del DTE y del sobre EnvioDTE | `Signature/XmlSigner` |
-| Construcción del sobre EnvioDTE | `Envelope/EnvelopeBuilder` |
-| Envío al SII y obtención del Track ID | `Utils/SiiWebService` |
-| Consulta de estado por Track ID | `Utils/SiiWebService` |
-| Asignación de folios CAF con bloqueo de concurrencia | `Folio/FolioManager` |
-| Validación del certificado digital (vencimiento, ruta segura) | `Storage/CertificateStore` |
-| Carga del certificado desde archivo o variable de entorno | `Storage/CertificateStore` |
-| Persistencia del XML firmado, Track ID y estado en la BD | `Storage/DteRepository` |
-| Generación de HTML renderizable a PDF | `Pdf/PdfGenerator` |
-| Actualización masiva de estados pendientes (para cron) | `SiiClient::procesarPendientes()` |
+| Función                                                                      | Clase responsable                 |
+|------------------------------------------------------------------------------|-----------------------------------|
+| Autenticación con el SII (semilla → token, renovación automática)            | `Auth/TokenManager`               |
+| Generación del XML DTE (tipos 33, 34, 39, 41, 46, 52, 56, 61, 110, 111, 112) | `Document/DteBuilder`             |
+| Cálculo automático de neto, IVA 19% y total                                  | `Document/DteBuilder`             |
+| Firma digital XMLDSig del DTE y del sobre EnvioDTE                           | `Signature/XmlSigner`             |
+| Construcción del sobre EnvioDTE                                              | `Envelope/EnvelopeBuilder`        |
+| Envío al SII y obtención del Track ID                                        | `Utils/SiiWebService`             |
+| Consulta de estado por Track ID                                              | `Utils/SiiWebService`             |
+| Asignación de folios CAF con bloqueo de concurrencia                         | `Folio/FolioManager`              |
+| Validación del certificado digital (vencimiento, ruta segura)                | `Storage/CertificateStore`        |
+| Carga del certificado desde archivo o variable de entorno                    | `Storage/CertificateStore`        |
+| Persistencia del XML firmado, Track ID y estado en la BD                     | `Storage/DteRepository`           |
+| Generación de HTML renderizable a PDF                                        | `Pdf/PdfGenerator`                |
+| Actualización masiva de estados pendientes (para cron)                       | `SiiClient::procesarPendientes()` |
 
 ### ❌ Debes implementar en tu aplicación
 
-| Tarea | Cómo hacerlo |
-|-------|-------------|
-| Crear las tablas en la BD | Ejecutar `database/migrations.sql` |
-| Importar el CAF al sistema | `$folioManager->importarCaf($xml, $tipo)` |
-| Alertas de folios por agotarse | Consultar `$folioManager->foliosDisponibles($tipo)` |
-| Solicitar nuevos CAF al SII | Manual en misiir.sii.cl cuando queden pocos folios |
-| Renovar el certificado digital | Con tu proveedor antes del vencimiento |
-| Cron de actualización de estados | `$client->procesarPendientes()` cada 15 minutos |
-| Generar el PDF final | Instalar `dompdf/dompdf` y renderizar el HTML |
-| Timbre electrónico PDF417 | Ver `docs/timbre.md` |
-| Guardar/enviar el PDF al cliente | Tu lógica de negocio |
+| Tarea                            | Cómo hacerlo                                        |
+|----------------------------------|-----------------------------------------------------|
+| Crear las tablas en la BD        | Ejecutar `database/migrations.sql`                  |
+| Importar el CAF al sistema       | `$folioManager->importarCaf($xml, $tipo)`           |
+| Alertas de folios por agotarse   | Consultar `$folioManager->foliosDisponibles($tipo)` |
+| Solicitar nuevos CAF al SII      | Manual en misiir.sii.cl cuando queden pocos folios  |
+| Renovar el certificado digital   | Con tu proveedor antes del vencimiento              |
+| Cron de actualización de estados | `$client->procesarPendientes()` cada 15 minutos     |
+| Generar el PDF final             | Instalar `dompdf/dompdf` y renderizar el HTML       |
+| Timbre electrónico PDF417        | Ver `docs/timbre.md`                                |
+| Guardar/enviar el PDF al cliente | Tu lógica de negocio                                |
 
 ---
 
 ## Tipos de DTE soportados
 
-| Código | Nombre | IVA | Observaciones |
-|--------|--------|-----|---------------|
-| **33** | Factura Electrónica | Afecta | Más común. Receptor es empresa |
-| **34** | Factura No Afecta Electrónica | Exenta | Servicios médicos, educación |
-| **39** | Boleta Electrónica | Afecta | Consumidor final. Obligatoria desde 2023 |
-| **41** | Boleta No Afecta Electrónica | Exenta | Boleta a consumidor final sin IVA |
-| **46** | Factura de Compra Electrónica | Afecta | La emite el COMPRADOR, retiene el IVA |
-| **52** | Guía de Despacho Electrónica | Afecta | Requiere `ind_traslado` |
-| **56** | Nota de Débito Electrónica | Afecta | Aumenta monto. Requiere referencia |
-| **61** | Nota de Crédito Electrónica | Afecta | Anula o corrige. Requiere referencia |
-| **110** | Factura de Exportación | Sin IVA | Moneda extranjera. Requiere país |
-| **111** | Nota de Débito Exportación | Sin IVA | Requiere referencia |
-| **112** | Nota de Crédito Exportación | Sin IVA | Requiere referencia |
+| Código  | Nombre                        | IVA     | Observaciones                            |
+|---------|-------------------------------|---------|------------------------------------------|
+| **33**  | Factura Electrónica           | Afecta  | Más común. Receptor es empresa           |
+| **34**  | Factura No Afecta Electrónica | Exenta  | Servicios médicos, educación             |
+| **39**  | Boleta Electrónica            | Afecta  | Consumidor final. Obligatoria desde 2023 |
+| **41**  | Boleta No Afecta Electrónica  | Exenta  | Boleta a consumidor final sin IVA        |
+| **46**  | Factura de Compra Electrónica | Afecta  | La emite el COMPRADOR, retiene el IVA    |
+| **52**  | Guía de Despacho Electrónica  | Afecta  | Requiere `ind_traslado`                  |
+| **56**  | Nota de Débito Electrónica    | Afecta  | Aumenta monto. Requiere referencia       |
+| **61**  | Nota de Crédito Electrónica   | Afecta  | Anula o corrige. Requiere referencia     |
+| **110** | Factura de Exportación        | Sin IVA | Moneda extranjera. Requiere país         |
+| **111** | Nota de Débito Exportación    | Sin IVA | Requiere referencia                      |
+| **112** | Nota de Crédito Exportación   | Sin IVA | Requiere referencia                      |
 
 ---
 
 ## Instalación
 
 ```bash
-composer require tuempresa/sii-dte-php
+composer require fvildoso/sii-dte-php
 ```
+
+## Requisitos
+
+- PHP 8.4 o superior.
+- Extensiones PHP: `soap`, `openssl`, `dom`, `libxml` y `curl`.
 
 ---
 
@@ -84,6 +93,7 @@ openssl pkcs12 -in empresa.p12 -nokeys -clcerts | openssl x509 -text | grep "Not
 ```
 
 **Dónde guardarlo:**
+
 ```bash
 # CORRECTO: fuera del webroot
 /var/secure/certs/empresa.p12
@@ -94,6 +104,7 @@ chmod 640 /var/secure/certs/empresa.p12
 ```
 
 La contraseña del certificado debe venir de variable de entorno:
+
 ```bash
 # En .env o en el servidor:
 SII_CERT_PASS=mi_contraseña_segura
@@ -110,7 +121,7 @@ echo "*.p12" >> .gitignore
 2. **Servicios online → Factura Electrónica → Sistema de Facturación Propio**
 3. Subir tu certificado digital para registro
 4. Anotar el **número de resolución** y **fecha de resolución**
-   - En certificación: número = `0`, fecha = `2019-10-18`
+    - En certificación: número = `0`, fecha = `2019-10-18`
 
 ---
 
@@ -122,13 +133,13 @@ mysql -u usuario -p mi_base_de_datos < database/migrations.sql
 
 Las tablas creadas:
 
-| Tabla | Contenido |
-|-------|-----------|
-| `sii_caf` | CAF importados con rango de folios y estado |
-| `sii_dte` | DTE emitidos con XML firmado, Track ID y estado |
-| `sii_folios_anulados` | Folios perdidos por rechazo |
-| `sii_log_envios` | Log de comunicaciones con el SII |
-| `sii_tokens` | Caché de tokens de sesión |
+| Tabla                 | Contenido                                       |
+|-----------------------|-------------------------------------------------|
+| `sii_caf`             | CAF importados con rango de folios y estado     |
+| `sii_dte`             | DTE emitidos con XML firmado, Track ID y estado |
+| `sii_folios_anulados` | Folios perdidos por rechazo                     |
+| `sii_log_envios`      | Log de comunicaciones con el SII                |
+| `sii_tokens`          | Caché de tokens de sesión                       |
 
 ---
 
@@ -137,11 +148,13 @@ Las tablas creadas:
 El CAF (Código de Autorización de Folios) es el permiso del SII para emitir documentos en un rango de números.
 
 **Obtenerlo:**
+
 1. Portal SII: **Factura Electrónica → Solicitar Folios**
 2. Seleccionar tipo (ej: 33 = Factura) y cantidad (ej: 100)
 3. Descargar el `.xml` del CAF
 
 **Importarlo:**
+
 ```php
 $pdo = new PDO('mysql:host=localhost;dbname=mi_bd', 'user', 'pass');
 $folioManager = new SiiDte\Folio\FolioManager($pdo);
@@ -153,6 +166,7 @@ echo "Disponibles: " . $folioManager->foliosDisponibles(33); // → 100
 ```
 
 **Alerta de agotamiento:**
+
 ```php
 if ($folioManager->foliosDisponibles(33) < 10) {
     enviarAlerta("⚠️ Pocos folios. Solicita CAF en el SII.");
@@ -261,7 +275,8 @@ $pdf->render();
 file_put_contents("factura_{$resultado['folio']}.pdf", $pdf->output());
 ```
 
-> **Timbre Electrónico:** El PDF oficial del SII incluye un código de barras 2D (PDF417) generado con los datos del CAF y firma del SII. Ver `docs/timbre.md` para implementarlo.
+> **Timbre Electrónico:** El PDF oficial del SII incluye un código de barras 2D (PDF417) generado con los datos del CAF
+> y firma del SII. Ver `docs/timbre.md` para implementarlo.
 
 ---
 
@@ -275,6 +290,7 @@ $estado = $client->consultarEstado($resultado['trackId']);
 ```
 
 **Cron de actualización automática:**
+
 ```bash
 # crontab -e
 */15 * * * * php /ruta/proyecto/bin/procesar_pendientes.php >> /var/log/sii.log 2>&1
