@@ -285,7 +285,7 @@ sii-dte-php/
 
 Al completar correctamente las pruebas, cada `push` a `main` crea o reutiliza un release de GitHub para el commit verificado y solicita a Packagist que actualice el paquete. Los pull requests y las ramas distintas de `main` solo ejecutan CI.
 
-Las versiones siguen el formato `vYYYY.MM.DD.<run_id>+<sha_corto>` (por ejemplo, `v2026.11.07.123456+abcdef0`): la fecha corresponde al inicio UTC de la ejecución de GitHub Actions, el identificador de ejecución hace única la versión del día y el SHA permite rastrear el commit. Composer elimina los metadatos de compilación (`+<sha>`) al normalizar la versión, por lo que el identificador numérico anterior a `+` es el que mantiene cada versión publicada única y ordenable.
+Las versiones siguen el formato `vYYYY.MM.DD-<run_id>+<sha_corto>` (por ejemplo, `v2026.11.07-123456+abcdef0`): la fecha corresponde al inicio UTC de la ejecución de GitHub Actions, el identificador de ejecución distingue las publicaciones del día y el SHA permite rastrear el commit. Composer normaliza el guion posterior a la fecha igual que el separador anterior y elimina los metadatos de compilación (`+<sha>`); por ello, el SHA no interviene en la comparación de versiones.
 
 Para habilitar la actualización automática, configura estos secretos en **Settings → Secrets and variables → Actions** del repositorio:
 

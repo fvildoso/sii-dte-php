@@ -79,7 +79,7 @@ jobs:
               run_id: Number(context.runId),
             });
             const date = run.data.created_at.slice(0, 10).replaceAll('-', '.');
-            const tagName = `v${date}.${context.runId}+${sha.slice(0, 7)}`;
+            const tagName = `v${date}-${context.runId}+${sha.slice(0, 7)}`;
             const tagRef = `tags/${tagName}`;
 
             async function findTagRef() {
