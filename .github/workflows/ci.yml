@@ -146,7 +146,7 @@ jobs:
             await core.summary
               .addHeading('GitHub release published')
               .addLink(tagName, release.data.html_url)
-              .addText(`Commit: ${sha}`)
+              .addRaw(`\n\nCommit: ${sha}`)
               .write();
 
       - name: Update Packagist
