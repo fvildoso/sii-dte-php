@@ -281,6 +281,21 @@ sii-dte-php/
 
 ---
 
+## Publicación de releases
+
+Al completar correctamente las pruebas, cada `push` a `main` crea o reutiliza un release de GitHub para el commit verificado y solicita a Packagist que actualice el paquete. Los pull requests y las ramas distintas de `main` solo ejecutan CI.
+
+Las versiones siguen el formato `vYYYY.MM.DD.<run_id>+<sha_corto>` (por ejemplo, `v2026.11.07.123456+abcdef0`): la fecha corresponde al inicio UTC de la ejecución de GitHub Actions, el identificador de ejecución hace única la versión del día y el SHA permite rastrear el commit. Composer elimina los metadatos de compilación (`+<sha>`) al normalizar la versión, por lo que el identificador numérico anterior a `+` es el que mantiene cada versión publicada única y ordenable.
+
+Para habilitar la actualización automática, configura estos secretos en **Settings → Secrets and variables → Actions** del repositorio:
+
+- `PACKAGIST_USERNAME`: usuario de Packagist.
+- `PACKAGIST_API_TOKEN`: token de API de Packagist (el token seguro basta para solicitar la actualización).
+
+El paquete debe estar registrado previamente en Packagist. El workflow no mueve etiquetas ya creadas: publica el release y solicita la actualización de Packagist solo cuando la etiqueta nueva o existente apunta al commit probado. Si se reintenta una ejecución, reutiliza la etiqueta y el release existentes solo si apuntan al mismo commit.
+
+---
+
 ## Licencia
 
 Este proyecto está licenciado bajo la licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.

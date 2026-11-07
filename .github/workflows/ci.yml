@@ -45,3 +45,120 @@ jobs:
           path: coverage/
           if-no-files-found: warn
           retention-days: 14
+
+  publish:
+    name: Publish release
+    needs: tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Validate Packagist credentials
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+        run: |
+          if [ -z "$PACKAGIST_USERNAME" ] || [ -z "$PACKAGIST_API_TOKEN" ]; then
+            echo "PACKAGIST_USERNAME and PACKAGIST_API_TOKEN secrets must be configured." >&2
+            exit 1
+          fi
+
+      - name: Create or reuse GitHub release
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.sha;
+            const run = await github.rest.actions.getWorkflowRun({
+              owner,
+              repo,
+              run_id: Number(context.runId),
+            });
+            const date = run.data.created_at.slice(0, 10).replaceAll('-', '.');
+            const tagName = `v${date}.${context.runId}+${sha.slice(0, 7)}`;
+            const tagRef = `tags/${tagName}`;
+
+            async function findTagRef() {
+              try {
+                return await github.rest.git.getRef({ owner, repo, ref: tagRef });
+              } catch (error) {
+                if (error.status === 404) return null;
+                throw error;
+              }
+            }
+
+            let ref = await findTagRef();
+            if (!ref) {
+              try {
+                await github.rest.git.createRef({
+                  owner,
+                  repo,
+                  ref: `refs/${tagRef}`,
+                  sha,
+                });
+              } catch (error) {
+                if (error.status !== 422) throw error;
+              }
+              ref = await findTagRef();
+            }
+            if (!ref) {
+              throw new Error(`Could not create or find tag ${tagName}`);
+            }
+
+            let target = ref.data.object;
+            while (target.type === 'tag') {
+              const annotatedTag = await github.rest.git.getTag({
+                owner,
+                repo,
+                tag_sha: target.sha,
+              });
+              target = annotatedTag.data.object;
+            }
+            if (target.type !== 'commit' || target.sha !== sha) {
+              throw new Error(`Tag ${tagName} already points to a different commit`);
+            }
+
+            let release;
+            try {
+              release = await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              try {
+                release = await github.rest.repos.createRelease({
+                  owner,
+                  repo,
+                  tag_name: tagName,
+                  target_commitish: sha,
+                  name: tagName,
+                  body: `Automated release for commit ${sha}.`,
+                  make_latest: 'legacy',
+                });
+              } catch (createError) {
+                if (createError.status !== 422) throw createError;
+                release = await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName });
+              }
+            }
+
+            await core.summary
+              .addHeading('GitHub release published')
+              .addLink(tagName, release.data.html_url)
+              .addText(`Commit: ${sha}`)
+              .write();
+
+      - name: Update Packagist
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+          PACKAGIST_REPOSITORY_URL: https://github.com/${{ github.repository }}
+        run: |
+          payload=$(printf '{"repository":{"url":"%s"}}' "$PACKAGIST_REPOSITORY_URL")
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${PACKAGIST_USERNAME}:${PACKAGIST_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "$payload" \
+            https://packagist.org/api/update-package
