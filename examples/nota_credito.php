@@ -1,8 +1,7 @@
 <?php
 
 /**
- * Ejemplo: Emitir una Nota de Crédito Electrónica (tipo 61)
- * para anular o corregir una Factura Electrónica.
+ * Ejemplo histórico deshabilitado: la emisión de notas no está implementada de forma conforme.
  */
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -10,6 +9,9 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use SiiDte\SiiClient;
 use SiiDte\Document\DteTypes;
 use SiiDte\Exceptions\SiiException;
+
+fwrite(STDERR, "Ejemplo heredado deshabilitado. SiiClient::enviarDte() no transmite documentos.\n");
+exit(1);
 
 $client = new SiiClient([
     'rut_emisor'        => '12345678',

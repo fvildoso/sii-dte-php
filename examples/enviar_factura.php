@@ -1,45 +1,39 @@
 <?php
 
 /**
- * Ejemplo: Enviar una Factura Electrónica (tipo 33) al SII.
+ * Ejemplo seguro: generar localmente un borrador de factura (tipo 33).
  *
- * IMPORTANTE: Ejecutar primero en ambiente de certificación.
+ * No envía documentos. El XML no tiene TED, firma, sobre ni validación XSD.
  */
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-use SiiDte\SiiClient;
 use SiiDte\Document\DteTypes;
-use SiiDte\Exceptions\SiiException;
+use SiiDte\Document\DteBuilder;
 
 // ============================================================
-// 1. Configurar el cliente con los datos del emisor
+// 1. Configurar el borrador con los datos del emisor
 // ============================================================
-$client = new SiiClient([
-    'rut_emisor'         => '12345678',          // RUT sin DV
-    'dv_emisor'          => '9',                 // Dígito verificador
+$builder = new DteBuilder([
+    'rut_emisor'         => '76123456',
+    'dv_emisor'          => '0',
     'razon_social'       => 'Mi Empresa SpA',
     'giro'               => 'Venta de Software',
     'direccion'          => 'Av. Providencia 1234',
     'ciudad'             => 'Santiago',
-    'numero_resolucion'  => 0,                   // 0 para certificación
-    'fecha_resolucion'   => '2019-10-18',        // Fecha resolución SII
-    'cert_path'          => __DIR__ . '/certs/mi_certificado.p12',
-    'cert_pass'          => 'mi_contraseña',
-    'ambiente'           => 'certificacion',     // Cambiar a 'produccion' cuando esté listo
 ]);
 
 // ============================================================
 // 2. Definir los datos de la factura
 // ============================================================
 $datos = [
-    'folio'    => 1,                    // Número de folio del CAF
+    'folio'    => 1,                    // Valor de ejemplo para el borrador; no se reserva
     'fecha'    => date('Y-m-d'),        // Fecha de emisión
 
     // Datos del receptor (cliente)
     'receptor' => [
         'rut'          => '98765432',
-        'dv'           => '1',
+        'dv'           => '5',
         'razon_social' => 'Cliente Ejemplo Ltda',
         'giro'         => 'Servicios de TI',
         'direccion'    => 'Calle Falsa 123',
@@ -53,7 +47,7 @@ $datos = [
             'descripcion'      => 'Licencia Pro 2024 - 1 usuario',
             'cantidad'         => 2,
             'unidad'           => 'UN',
-            'precio_unitario'  => 119000,   // Precio con IVA incluido
+            'precio_unitario'  => 119000,   // Solo dato del borrador; cálculo tributario no validado
         ],
         [
             'nombre'           => 'Soporte Técnico',
@@ -74,41 +68,7 @@ $datos = [
 ];
 
 // ============================================================
-// 3. Enviar la factura
+// 3. Generar vista previa local: no reserva folios ni contacta al SII.
 // ============================================================
-try {
-    echo "Enviando Factura Electrónica al SII...\n";
-
-    $resultado = $client->enviarDte(DteTypes::FACTURA_ELECTRONICA, $datos);
-
-    echo "✅ Factura enviada exitosamente!\n";
-    echo "   Track ID: {$resultado['trackId']}\n";
-    echo "   Guarda este Track ID para consultar el estado.\n\n";
-
-    // Guardar el XML generado (opcional, para tus registros)
-    file_put_contents(__DIR__ . '/output/factura_' . $datos['folio'] . '.xml', $resultado['xml']);
-    echo "   XML guardado en: output/factura_{$datos['folio']}.xml\n";
-
-} catch (SiiException $e) {
-    echo "❌ Error SII: " . $e->getMessage() . "\n";
-    exit(1);
-}
-
-// ============================================================
-// 4. Consultar estado del envío (después de unos minutos)
-// ============================================================
-echo "\nConsultando estado del envío...\n";
-try {
-    $estado = $client->consultarEstado($resultado['trackId']);
-    echo "Estado: {$estado['estado']}\n";
-    echo "Glosa:  {$estado['glosa']}\n";
-
-    if (!empty($estado['detalle'])) {
-        echo "\nDetalle de documentos:\n";
-        foreach ($estado['detalle'] as $doc) {
-            echo "  Folio {$doc['folio']} (Tipo {$doc['tipo']}): {$doc['estado']}\n";
-        }
-    }
-} catch (SiiException $e) {
-    echo "No se pudo consultar el estado (es normal esperar unos minutos): " . $e->getMessage() . "\n";
-}
+$borrador = $builder->build(DteTypes::FACTURA_ELECTRONICA, $datos);
+echo 'Borrador local generado (' . strlen($borrador) . " bytes ISO-8859-1). No se envió al SII.\n";
