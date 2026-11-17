@@ -7,6 +7,7 @@ namespace SiiDte\Tests;
 use PHPUnit\Framework\TestCase;
 use SiiDte\Document\DteBuilder;
 use SiiDte\Document\DteTypes;
+use SiiDte\Exceptions\SiiException;
 
 /**
  * Pruebas para el constructor de XML de DTE.
@@ -17,14 +18,12 @@ class DteBuilderTest extends TestCase
 
     /**
      * Configura el entorno de pruebas.
-     *
-     * @return void
      */
     protected function setUp(): void
     {
         $this->config = [
-            'rut_emisor'        => '12345678',
-            'dv_emisor'         => '9',
+            'rut_emisor'        => '76123456',
+            'dv_emisor'         => '0',
             'razon_social'      => 'Empresa Test SpA',
             'giro'              => 'Servicios de TI',
             'direccion'         => 'Av. Ejemplo 100',
@@ -39,8 +38,6 @@ class DteBuilderTest extends TestCase
 
     /**
      * Verifica que el XML generado contenga los datos básicos y la estructura correcta.
-     *
-     * @return void
      */
     public function testBuildGeneraXmlValido(): void
     {
@@ -51,7 +48,7 @@ class DteBuilderTest extends TestCase
             'fecha' => '2024-01-15',
             'receptor' => [
                 'rut'          => '98765432',
-                'dv'           => '1',
+                'dv'           => '5',
                 'razon_social' => 'Cliente Test',
                 'giro'         => 'Comercio',
                 'direccion'    => 'Calle Test 1',
@@ -71,15 +68,79 @@ class DteBuilderTest extends TestCase
         $this->assertStringContainsString('<DTE', $xml);
         $this->assertStringContainsString('<TipoDTE>33</TipoDTE>', $xml);
         $this->assertStringContainsString('<Folio>1</Folio>', $xml);
-        $this->assertStringContainsString('12345678-9', $xml);
-        $this->assertStringContainsString('98765432-1', $xml);
+        $this->assertStringContainsString('76123456-0', $xml);
+        $this->assertStringContainsString('98765432-5', $xml);
         $this->assertStringContainsString('Producto A', $xml);
+    }
+
+    public function testXmlDeclaradoLatin1CoincideConLosBytesYPreservaTildesYEscapes(): void
+    {
+        $builder = new DteBuilder($this->config);
+        $datos = [
+            'folio' => 2,
+            'fecha' => '2024-01-15',
+            'receptor' => [
+                'rut' => '98765432',
+                'dv' => '5',
+                'razon_social' => 'Cliente SpA',
+                'giro' => 'Comercio',
+                'direccion' => 'Calle Uno 1',
+                'ciudad' => 'Valparaíso',
+            ],
+            'detalle' => [[
+                'nombre' => 'Té & <café>',
+                'cantidad' => 1,
+                'precio_unitario' => 100,
+            ]],
+        ];
+
+        $xml = $builder->build(DteTypes::FACTURA_ELECTRONICA, $datos);
+        $this->assertStringContainsString('encoding="ISO-8859-1"', $xml);
+        $this->assertStringContainsString(iconv('UTF-8', 'ISO-8859-1', '<CmnaRecep>Valparaíso</CmnaRecep>'), $xml);
+
+        $document = new \DOMDocument();
+        $this->assertTrue($document->loadXML($xml));
+        $itemName = $document->getElementsByTagNameNS('http://www.sii.cl/SiiDte', 'NmbItem')->item(0);
+        $this->assertNotNull($itemName);
+        $this->assertSame('Té & <café>', $itemName->textContent);
+    }
+
+    public function testRechazaCaracteresNoRepresentablesSinPerdidaSilenciosa(): void
+    {
+        $this->expectException(SiiException::class);
+        (new DteBuilder($this->config))->build(DteTypes::FACTURA_ELECTRONICA, [
+            'folio' => 3,
+            'fecha' => '2024-01-15',
+            'receptor' => ['rut' => '98765432', 'dv' => '5', 'razon_social' => 'Cliente'],
+            'detalle' => [['nombre' => 'Producto 😀', 'precio_unitario' => 100]],
+        ]);
+    }
+
+    public function testRechazaRutfuenteInvalidoYFechaInvalida(): void
+    {
+        $builder = new DteBuilder($this->config);
+        $data = [
+            'folio' => 4,
+            'fecha' => '2024-02-30',
+            'receptor' => ['rut' => '98765432', 'dv' => '5', 'razon_social' => 'Cliente'],
+            'detalle' => [['nombre' => 'Producto', 'precio_unitario' => 100]],
+        ];
+
+        try {
+            $builder->build(DteTypes::FACTURA_ELECTRONICA, $data);
+            $this->fail('Se esperaba rechazo de una fecha inexistente.');
+        } catch (SiiException $exception) {
+            $this->assertStringContainsString('fecha', $exception->getMessage());
+        }
+
+        $data['fecha'] = '2024-02-29';
+        $data['receptor']['dv'] = '1';
+        $this->expectException(SiiException::class);
+        $builder->build(DteTypes::FACTURA_ELECTRONICA, $data);
     }
 
     /**
      * Verifica que los montos totales e impuestos se calculen correctamente.
-     *
-     * @return void
      */
     public function testCalculaTotalesConIva(): void
     {
@@ -89,7 +150,7 @@ class DteBuilderTest extends TestCase
             'folio' => 1,
             'fecha' => '2024-01-15',
             'receptor' => [
-                'rut' => '98765432', 'dv' => '1',
+                'rut' => '98765432', 'dv' => '5',
                 'razon_social' => 'Test',
             ],
             'detalle' => [
@@ -109,8 +170,6 @@ class DteBuilderTest extends TestCase
 
     /**
      * Verifica que se lance una excepción si no hay líneas de detalle.
-     *
-     * @return void
      */
     public function testLanzaExcepcionSinDetalle(): void
     {
@@ -128,8 +187,6 @@ class DteBuilderTest extends TestCase
 
     /**
      * Verifica el comportamiento de los tipos de documentos no afectos a IVA.
-     *
-     * @return void
      */
     public function testTiposNoAfectos(): void
     {

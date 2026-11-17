@@ -40,6 +40,7 @@ class CertificateStoreTest extends TestCase
         if (self::$openSslConfigPath !== null) {
             $args['config'] = self::$openSslConfigPath;
         }
+
         return $args;
     }
     public function testRechazaUnCertificadoInexistente(): void
@@ -135,6 +136,176 @@ class CertificateStoreTest extends TestCase
         }
     }
 
+    public function testCargaDesdeBytesSinCrearUnArchivoTemporalYGetPathFallaExplicitamente(): void
+    {
+        [$pkcs12, $password] = $this->createPkcs12();
+
+        $store = CertificateStore::fromBytes($pkcs12, $password);
+
+        $this->assertSame($pkcs12, $store->getPkcs12Data());
+        $this->assertSame($password, $store->getPassword());
+        $this->assertSame(true, $store->getInfo()['vigente']);
+        $this->assertSame(false, $store->getInfo()['aun_no_vigente']);
+        $this->expectException(SiiException::class);
+        $this->expectExceptionMessage('no tiene una ruta de archivo');
+        $store->getPath();
+    }
+
+    public function testCargaDesdeBase64EnMemoria(): void
+    {
+        [$pkcs12, $password] = $this->createPkcs12();
+
+        $store = CertificateStore::fromBase64(base64_encode($pkcs12), $password);
+
+        $this->assertSame($pkcs12, $store->getPkcs12Data());
+    }
+
+    public function testCargaDesdeVariablesDeEntornoSinRutaTemporal(): void
+    {
+        [$pkcs12, $password] = $this->createPkcs12();
+        $certVar = 'SII_TEST_CERT_B64_' . strtoupper(bin2hex(random_bytes(4)));
+        $passVar = 'SII_TEST_CERT_PASS_' . strtoupper(bin2hex(random_bytes(4)));
+        putenv($certVar . '=' . base64_encode($pkcs12));
+        putenv($passVar . '=' . $password);
+
+        try {
+            $store = CertificateStore::fromEnv($certVar, $passVar);
+
+            $this->assertSame($pkcs12, $store->getPkcs12Data());
+            $this->expectException(SiiException::class);
+            $this->expectExceptionMessage('no tiene una ruta de archivo');
+            $store->getPath();
+        } finally {
+            putenv($certVar);
+            putenv($passVar);
+        }
+    }
+
+    public function testRechazaContrasenaIncorrectaParaCertificadoEnMemoria(): void
+    {
+        [$pkcs12] = $this->createPkcs12();
+
+        $this->expectException(SiiException::class);
+        $this->expectExceptionMessage('No se pudo abrir el certificado PKCS#12');
+
+        CertificateStore::fromBytes($pkcs12, 'incorrecta');
+    }
+
+    public function testRechazaClavePrivadaQueNoCorrespondeAlCertificado(): void
+    {
+        $privateKey = openssl_pkey_new($this->getOpenSslArgs());
+        self::assertNotFalse($privateKey);
+
+        $csrArgs = self::$openSslConfigPath !== null ? ['config' => self::$openSslConfigPath] : [];
+        $csr = openssl_csr_new(['commonName' => 'test.local'], $privateKey, $csrArgs);
+        self::assertNotFalse($csr);
+        $certificate = openssl_csr_sign($csr, null, $privateKey, 2, $csrArgs);
+        self::assertNotFalse($certificate);
+
+        [$differentPkcs12, $password] = $this->createPkcs12();
+        self::assertTrue(openssl_pkcs12_read($differentPkcs12, $differentCertificates, $password));
+
+        $certificatePem = '';
+        self::assertTrue(openssl_x509_export($certificate, $certificatePem));
+        $validator = new \ReflectionMethod(CertificateStore::class, 'assertMatchingKey');
+
+        $this->expectException(SiiException::class);
+        $this->expectExceptionMessage('no corresponde al certificado');
+
+        $validator->invoke(null, $certificatePem, $differentCertificates['pkey']);
+    }
+
+    public function testCompruebaLimitesDeVigenciaConRelojInyectado(): void
+    {
+        [$pkcs12, $password, $validFrom, $validTo] = $this->createPkcs12();
+
+        $atNotBefore = CertificateStore::fromBytes(
+            $pkcs12,
+            $password,
+            static fn (): \DateTimeImmutable => new \DateTimeImmutable('@' . $validFrom)
+        );
+        $atNotAfter = CertificateStore::fromBytes(
+            $pkcs12,
+            $password,
+            static fn (): \DateTimeImmutable => new \DateTimeImmutable('@' . $validTo)
+        );
+
+        $this->assertTrue($atNotBefore->getInfo()['vigente']);
+        $this->assertTrue($atNotAfter->getInfo()['vigente']);
+
+        try {
+            CertificateStore::fromBytes(
+                $pkcs12,
+                $password,
+                static fn (): \DateTimeImmutable => new \DateTimeImmutable('@' . ($validFrom - 1))
+            );
+            $this->fail('El certificado aún no válido debía rechazarse.');
+        } catch (SiiException $exception) {
+            $this->assertStringContainsString('aún no está vigente', $exception->getMessage());
+        }
+
+        try {
+            CertificateStore::fromBytes(
+                $pkcs12,
+                $password,
+                static fn (): \DateTimeImmutable => new \DateTimeImmutable('@' . ($validTo + 1))
+            );
+            $this->fail('El certificado vencido debía rechazarse.');
+        } catch (SiiException $exception) {
+            $this->assertStringContainsString('ha vencido', $exception->getMessage());
+        }
+    }
+
+    public function testRechazaCertificadoEnDirectorioPublicoAunqueLaRutaEsteNormalizada(): void
+    {
+        [$pkcs12, $password] = $this->createPkcs12();
+        $directory = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'sii-public-' . bin2hex(random_bytes(6));
+        $publicDirectory = $directory . DIRECTORY_SEPARATOR . 'PUBLIC';
+        $path = $publicDirectory . DIRECTORY_SEPARATOR . 'certificate.p12';
+
+        self::assertTrue(mkdir($publicDirectory, 0777, true));
+        self::assertNotFalse(file_put_contents($path, $pkcs12));
+
+        try {
+            $this->expectException(SiiException::class);
+            $this->expectExceptionMessage('directorio público');
+
+            CertificateStore::fromFile($path, $password);
+        } finally {
+            unlink($path);
+            rmdir($publicDirectory);
+            rmdir($directory);
+        }
+    }
+
+    /**
+     * @return array{string, string, int, int}
+     */
+    private function createPkcs12(string $password = 'password-de-prueba'): array
+    {
+        $privateKey = openssl_pkey_new($this->getOpenSslArgs());
+        self::assertNotFalse($privateKey);
+
+        $csrArgs = self::$openSslConfigPath !== null ? ['config' => self::$openSslConfigPath] : [];
+        $csr = openssl_csr_new(['commonName' => 'test.local'], $privateKey, $csrArgs);
+        self::assertNotFalse($csr);
+
+        $certificate = openssl_csr_sign($csr, null, $privateKey, 2, $csrArgs);
+        self::assertNotFalse($certificate);
+
+        $pkcs12 = '';
+        self::assertTrue(openssl_pkcs12_export($certificate, $pkcs12, $privateKey, $password));
+        self::assertTrue(openssl_pkcs12_read($pkcs12, $certificates, $password));
+        $certificateInfo = openssl_x509_parse($certificates['cert']);
+
+        return [
+            $pkcs12,
+            $password,
+            $certificateInfo['validFrom_time_t'],
+            $certificateInfo['validTo_time_t'],
+        ];
+    }
+
     public function testRechazaUnCertificadoConContrasenaIncorrecta(): void
     {
         $privateKey = openssl_pkey_new($this->getOpenSslArgs());
@@ -215,7 +386,6 @@ class CertificateStoreTest extends TestCase
         }
     }
 
-
     public function testRechazaCertificadoInvalidoEnVariablesDeEntorno(): void
     {
         $certVar = 'SII_TEST_CERT_B64_' . strtoupper(bin2hex(random_bytes(4)));
@@ -234,7 +404,6 @@ class CertificateStoreTest extends TestCase
             putenv($passVar);
         }
     }
-
 
     public function testRechazaContrasenaIncorrectaEnVariablesDeEntorno(): void
     {
