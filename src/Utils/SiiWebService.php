@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace SiiDte\Utils;
 
 use SiiDte\Exceptions\SiiException;
+use SiiDte\Exceptions\TransportException;
 
 /**
  * Cliente para los Web Services de recepción y consulta de DTE del SII.
  */
 class SiiWebService
 {
-    private string $ambiente;
+    private readonly HttpTransport $transport;
+    private readonly int $timeoutSeconds;
 
     // URLs upload DTE
     private const UPLOAD_URLS = [
@@ -21,64 +23,117 @@ class SiiWebService
 
     // URLs consulta estado
     private const STATUS_URLS = [
-        'certificacion' => 'https://maullin.sii.cl/DTEWS/QueryEstDteAv.jws',
-        'produccion'    => 'https://palena.sii.cl/DTEWS/QueryEstDteAv.jws',
+        'certificacion' => 'https://maullin.sii.cl/DTEWS/QueryEstUp.jws',
+        'produccion'    => 'https://palena.sii.cl/DTEWS/QueryEstUp.jws',
     ];
 
     // URLs consulta DTE individual
     private const QUERY_DTE_URLS = [
-        'certificacion' => 'https://maullin.sii.cl/DTEWS/services/wsRPETCConsulta',
-        'produccion'    => 'https://palena.sii.cl/DTEWS/services/wsRPETCConsulta',
+        'certificacion' => 'https://maullin.sii.cl/DTEWS/QueryEstDte.jws',
+        'produccion'    => 'https://palena.sii.cl/DTEWS/QueryEstDte.jws',
     ];
 
-    public function __construct(string $ambiente)
-    {
-        $this->ambiente = $ambiente;
+    public function __construct(
+        private readonly string $ambiente,
+        ?HttpTransport $transport = null,
+        int $timeoutSeconds = 60,
+    ) {
+        if ($timeoutSeconds < 1) {
+            throw new \InvalidArgumentException('El timeout del servicio SII debe ser positivo.');
+        }
+
+        $this->transport = $transport ?? new CurlHttpTransport();
+        $this->timeoutSeconds = $timeoutSeconds;
     }
 
     /**
      * Envía el sobre EnvioDTE al SII y retorna el Track ID.
      *
-     * @param string $rut          RUT emisor sin DV
-     * @param string $dv           DV del emisor
-     * @param string $xmlFirmado   XML del sobre firmado
-     * @param string $token        Token de sesión SII
-     * @return string              Track ID del envío
-     * @throws SiiException        Si el ambiente no es válido o el SII rechaza el envío
+     * @param string $rut RUT emisor sin DV
+     * @param string $dv DV del emisor
+     * @param string $xmlFirmado XML del sobre firmado
+     * @param string $token Token de sesión SII
+     * @throws SiiException Si el ambiente no es válido o el SII rechaza el envío
+     * @return string Track ID del envío
      */
-    public function uploadDte(string $rut, string $dv, string $xmlFirmado, string $token): string
-    {
+    public function uploadDte(
+        string $rut,
+        string $dv,
+        string $xmlFirmado,
+        string $token,
+        ?string $rutSender = null,
+        ?string $dvSender = null,
+    ): string {
         $url     = self::UPLOAD_URLS[$this->ambiente]
             ?? throw new SiiException("Ambiente no reconocido: {$this->ambiente}");
-        $rutFull = $rut . '-' . $dv;
+        $this->assertValidRut($rut, $dv);
+        if (($rutSender === null) !== ($dvSender === null)) {
+            throw new SiiException('El RUT y DV del firmante deben suministrarse juntos.');
+        }
+        $rutSender ??= $rut;
+        $dvSender ??= $dv;
+        $this->assertValidRut($rutSender, $dvSender);
+        $this->assertValidToken($token);
+        if ($xmlFirmado === '' || strlen($xmlFirmado) > 5 * 1024 * 1024) {
+            throw new SiiException('El XML del sobre está vacío o excede el límite permitido para el envío.');
+        }
 
         // El SII espera multipart/form-data con el XML como archivo
-        $boundary  = '----SiiDteBoundary' . md5((string) time());
+        try {
+            $boundary = '----SiiDteBoundary' . bin2hex(random_bytes(18));
+        } catch (\Throwable) {
+            throw new SiiException('No se pudo crear el separador multipart del envío.');
+        }
         $body      = "--{$boundary}\r\n";
-        $body     .= "Content-Disposition: form-data; name=\"rutSender\"\r\n\r\n{$rutFull}\r\n";
+        $body     .= "Content-Disposition: form-data; name=\"rutSender\"\r\n\r\n{$rutSender}\r\n";
         $body     .= "--{$boundary}\r\n";
-        $body     .= "Content-Disposition: form-data; name=\"rutCompany\"\r\n\r\n{$rutFull}\r\n";
+        $body     .= "Content-Disposition: form-data; name=\"dvSender\"\r\n\r\n{$dvSender}\r\n";
+        $body     .= "--{$boundary}\r\n";
+        $body     .= "Content-Disposition: form-data; name=\"rutCompany\"\r\n\r\n{$rut}\r\n";
+        $body     .= "--{$boundary}\r\n";
+        $body     .= "Content-Disposition: form-data; name=\"dvCompany\"\r\n\r\n{$dv}\r\n";
         $body     .= "--{$boundary}\r\n";
         $body     .= "Content-Disposition: form-data; name=\"archivo\"; filename=\"envio.xml\"\r\n";
         $body     .= "Content-Type: text/xml\r\n\r\n";
         $body     .= $xmlFirmado . "\r\n";
         $body     .= "--{$boundary}--\r\n";
 
-        $response  = $this->httpPost($url, $body, [
+        $response = $this->httpPost($url, $body, [
             'Cookie: TOKEN=' . $token,
             'Content-Type: multipart/form-data; boundary=' . $boundary,
-        ]);
+        ], true);
 
-        // Parsear Track ID
-        if (preg_match('/TRACKID>(\d+)<\/TRACKID/i', $response, $m)) {
-            return $m[1];
+        try {
+            $document = $this->loadResponseXml($response);
+            $payload = $this->findStringReturn($document);
+            if ($payload !== null) {
+                $document = $this->loadResponseXml($payload);
+            }
+            $this->assertNoSoapFault($document);
+        } catch (SiiException $exception) {
+            throw new TransportException(
+                'La respuesta de recepción no se pudo interpretar; el resultado remoto puede ser desconocido. No reintente automáticamente.',
+                true,
+                0,
+                $exception,
+            );
+        }
+        $status = $this->findElementText($document, 'STATUS');
+        $trackId = $this->findElementText($document, 'TRACKID');
+        if ($status === '0' && $trackId !== null
+            && preg_match('/^\d+$/D', $trackId) === 1 && preg_match('/[1-9]/', $trackId) === 1
+        ) {
+            return $trackId;
         }
 
-        if (preg_match('/ESTADO>([^<]+)<\/ESTADO/i', $response, $m)) {
-            throw new SiiException("SII rechazó el envío. Estado: {$m[1]} | Respuesta: " . substr($response, 0, 500));
+        if ($status !== null && preg_match('/^[1-9]$/D', $status) === 1 && $trackId === null) {
+            throw new SiiException('El SII no confirmó la recepción del envío. Código de respuesta: ' . substr($status, 0, 32));
         }
 
-        throw new SiiException('Respuesta inesperada del SII al enviar DTE: ' . substr($response, 0, 500));
+        throw new TransportException(
+            'No se pudo interpretar la respuesta de recepción; el resultado remoto puede ser desconocido. No reintente automáticamente.',
+            true,
+        );
     }
 
     /**
@@ -88,25 +143,29 @@ class SiiWebService
      * @param string $dv Dígito verificador del emisor
      * @param string $trackId ID de seguimiento retornado por el SII
      * @param string $token Token de sesión vigente
-     * @return array Mapa con el estado, glosa y detalle de la respuesta
      * @throws SiiException Si el ambiente no es válido
+     * @return array Mapa con el estado, glosa y detalle de la respuesta
      */
     public function getStatus(string $rut, string $dv, string $trackId, string $token): array
     {
         $url     = self::STATUS_URLS[$this->ambiente]
             ?? throw new SiiException("Ambiente no reconocido: {$this->ambiente}");
-        $rutFull = $rut . '-' . $dv;
-
-        $body    = '<getEstadoAvanzado>'
-            . '<Rut>' . htmlspecialchars($rutFull, ENT_XML1) . '</Rut>'
-            . '<TrackId>' . htmlspecialchars($trackId, ENT_XML1) . '</TrackId>'
-            . '<Token>' . htmlspecialchars($token, ENT_XML1) . '</Token>'
-            . '</getEstadoAvanzado>';
+        $this->assertValidRut($rut, $dv);
+        $this->assertValidToken($token);
+        if (preg_match('/^\d+$/D', $trackId) !== 1) {
+            throw new SiiException('El Track ID debe ser numérico.');
+        }
+        $body = '<m:getEstUp xmlns:m="http://DefaultNamespace">'
+            . $this->soapStringField('RutCompania', $rut)
+            . $this->soapStringField('DvCompania', $dv)
+            . $this->soapStringField('TrackId', $trackId)
+            . $this->soapStringField('Token', $token)
+            . '</m:getEstUp>';
 
         $soapXml = $this->wrapSoap($body);
         $response = $this->httpPost($url, $soapXml, [
             'Content-Type: text/xml; charset=UTF-8',
-            'SOAPAction: "getEstadoAvanzado"',
+            'SOAPAction: ""',
         ]);
 
         return $this->parseEstadoResponse($response);
@@ -124,8 +183,8 @@ class SiiWebService
      * @param string $fechaEmision Fecha de emisión (AAAA-MM-DD)
      * @param int $montoPesos Monto total del documento
      * @param string $token Token de sesión vigente
-     * @return array Resultado de la consulta puntual
      * @throws SiiException Si el ambiente no es válido
+     * @return array Resultado de la consulta puntual
      */
     public function queryDte(
         string $rutEmisor,
@@ -136,30 +195,51 @@ class SiiWebService
         int    $folio,
         string $fechaEmision,
         int    $montoPesos,
-        string $token
+        string $token,
+        ?string $rutConsultante = null,
+        ?string $dvConsultante = null,
     ): array {
         $url = self::QUERY_DTE_URLS[$this->ambiente]
             ?? throw new SiiException("Ambiente no reconocido: {$this->ambiente}");
 
-        $body = '<getEstDte>'
-            . '<RutEmisor>' . $rutEmisor . '-' . $dvEmisor . '</RutEmisor>'
-            . '<RutReceptor>' . $rutReceptor . '-' . $dvReceptor . '</RutReceptor>'
-            . '<TipoDTE>' . $tipoDte . '</TipoDTE>'
-            . '<Folio>' . $folio . '</Folio>'
-            . '<FchEmis>' . $fechaEmision . '</FchEmis>'
-            . '<MontoPesos>' . $montoPesos . '</MontoPesos>'
-            . '<Token>' . $token . '</Token>'
-            . '</getEstDte>';
+        $this->assertValidRut($rutEmisor, $dvEmisor);
+        $this->assertValidRut($rutReceptor, $dvReceptor);
+        if (($rutConsultante === null) !== ($dvConsultante === null)) {
+            throw new SiiException('El RUT y DV del consultante deben suministrarse juntos.');
+        }
+        $rutConsultante ??= $rutEmisor;
+        $dvConsultante ??= $dvEmisor;
+        $this->assertValidRut($rutConsultante, $dvConsultante);
+        $this->assertValidToken($token);
+        $parsedDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $fechaEmision);
+        if ($tipoDte <= 0 || $folio <= 0 || $montoPesos < 0 || $parsedDate === false
+            || $parsedDate->format('Y-m-d') !== $fechaEmision
+        ) {
+            throw new SiiException('Los parámetros de consulta del DTE no son válidos.');
+        }
+
+        $body = '<m:getEstDte xmlns:m="http://DefaultNamespace">'
+            . $this->soapStringField('RutConsultante', $rutConsultante)
+            . $this->soapStringField('DvConsultante', $dvConsultante)
+            . $this->soapStringField('RutCompania', $rutEmisor)
+            . $this->soapStringField('DvCompania', $dvEmisor)
+            . $this->soapStringField('RutReceptor', $rutReceptor)
+            . $this->soapStringField('DvReceptor', $dvReceptor)
+            . $this->soapStringField('TipoDte', (string) $tipoDte)
+            . $this->soapStringField('FolioDte', (string) $folio)
+            . $this->soapStringField('FechaEmisionDte', $parsedDate->format('dmY'))
+            . $this->soapStringField('MontoDte', (string) $montoPesos)
+            . $this->soapStringField('Token', $token)
+            . '</m:getEstDte>';
 
         $soapXml  = $this->wrapSoap($body);
         $response = $this->httpPost($url, $soapXml, [
             'Content-Type: text/xml; charset=UTF-8',
-            'SOAPAction: "getEstDte"',
+            'SOAPAction: ""',
         ]);
 
         return $this->parseEstadoResponse($response);
     }
-
 
     /**
      * Parsea la respuesta XML del estado de envío.
@@ -169,32 +249,29 @@ class SiiWebService
      */
     private function parseEstadoResponse(string $response): array
     {
-        $estado = '';
-        $glosa  = '';
-
-        if (preg_match('/<ESTADO>([^<]*)<\/ESTADO>/i', $response, $m)) {
-            $estado = $m[1];
+        $document = $this->loadResponseXml($response);
+        $payload = $this->findStringReturn($document);
+        if ($payload !== null) {
+            $document = $this->loadResponseXml($payload);
         }
-        if (preg_match('/<GLOSA>([^<]*)<\/GLOSA>/i', $response, $m)) {
-            $glosa = $m[1];
-        }
+        $this->assertNoSoapFault($document);
 
-        // Extraer detalles de documentos si existen
+        $estado = $this->findElementText($document, 'ESTADO') ?? '';
+        $glosa = $this->findElementText($document, 'GLOSA') ?? '';
         $detalle = [];
-        if (preg_match_all('/<DTE_ENVIADO>(.*?)<\/DTE_ENVIADO>/is', $response, $docs)) {
-            foreach ($docs[1] as $doc) {
-                $item = [];
-                if (preg_match('/<FOLIO>(\d+)<\/FOLIO>/i', $doc, $f)) {
-                    $item['folio']  = $f[1];
-                }
-                if (preg_match('/<TIPO_DTE>(\d+)<\/TIPO_DTE>/i', $doc, $t)) {
-                    $item['tipo']   = $t[1];
-                }
-                if (preg_match('/<ESTADO>([^<]+)<\/ESTADO>/i', $doc, $e)) {
-                    $item['estado'] = $e[1];
-                }
-                $detalle[] = $item;
+        foreach ($document->getElementsByTagName('*') as $node) {
+            if ($node->localName !== 'DTE_ENVIADO') {
+                continue;
             }
+
+            $item = [];
+            foreach (['FOLIO' => 'folio', 'TIPO_DTE' => 'tipo', 'ESTADO' => 'estado', 'GLOSA' => 'glosa'] as $tag => $key) {
+                $value = $this->findElementText($node, $tag);
+                if ($value !== null) {
+                    $item[$key] = $value;
+                }
+            }
+            $detalle[] = $item;
         }
 
         return [
@@ -203,6 +280,12 @@ class SiiWebService
             'detalle' => $detalle,
             'raw'     => $response,
         ];
+    }
+
+    private function soapStringField(string $name, string $value): string
+    {
+        return '<' . $name . ' xsi:type="xsd:string">'
+            . htmlspecialchars($value, ENT_XML1, 'UTF-8') . '</' . $name . '>';
     }
 
     /**
@@ -214,7 +297,10 @@ class SiiWebService
     private function wrapSoap(string $body): string
     {
         return '<?xml version="1.0" encoding="UTF-8"?>'
-            . '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">'
+            . '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"'
+            . ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+            . ' xmlns:xsd="http://www.w3.org/2001/XMLSchema"'
+            . ' soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
             . '<soapenv:Body>' . $body . '</soapenv:Body>'
             . '</soapenv:Envelope>';
     }
@@ -225,35 +311,111 @@ class SiiWebService
      * @param string $url URL de destino
      * @param string $body Cuerpo del POST
      * @param array $headers Lista de cabeceras HTTP
-     * @return string Cuerpo de la respuesta
      * @throws SiiException Si ocurre un error de conexión o el servidor responde error
+     * @return string Cuerpo de la respuesta
      */
-    private function httpPost(string $url, string $body, array $headers): string
+    private function httpPost(string $url, string $body, array $headers, bool $effectful = false): string
     {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $body,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_TIMEOUT        => 60,
-            CURLOPT_HTTPHEADER     => $headers,
-        ]);
+        $response = $this->transport->post($url, $body, $headers, $this->timeoutSeconds);
+        if ($response->statusCode < 200 || $response->statusCode >= 300) {
+            if ($effectful) {
+                throw new TransportException(
+                    'El servicio SII respondió HTTP ' . $response->statusCode
+                    . '; el resultado del envío puede ser desconocido. No reintente automáticamente.',
+                    true,
+                );
+            }
 
-        $response = curl_exec($ch);
-        $errno    = curl_errno($ch);
-        $errmsg   = curl_error($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($errno !== 0) {
-            throw new SiiException("Error HTTP [{$errno}]: {$errmsg}");
+            throw new SiiException('El servicio SII respondió HTTP ' . $response->statusCode . '.');
         }
 
-        if ($httpCode >= 500) {
-            throw new SiiException("Error del servidor SII (HTTP {$httpCode}).");
+        return $response->body;
+    }
+
+    private function assertValidRut(string $rut, string $dv): void
+    {
+        if (preg_match('/^[0-9]{1,8}$/D', $rut) !== 1
+            || preg_match('/^[0-9Kk]$/D', $dv) !== 1
+            || !RutHelper::validate($rut . '-' . $dv)
+        ) {
+            throw new SiiException('El RUT indicado para la operación no es válido.');
+        }
+    }
+
+    private function assertValidToken(string $token): void
+    {
+        if ($token === '' || preg_match('/^[A-Za-z0-9._-]+$/D', $token) !== 1) {
+            throw new SiiException('El token de sesión está vacío o contiene caracteres de control.');
+        }
+    }
+
+    private function loadResponseXml(string $xml): \DOMDocument
+    {
+        if ($xml === '' || strlen($xml) > 2 * 1024 * 1024) {
+            throw new SiiException('La respuesta XML del SII está vacía o excede el límite permitido.');
         }
 
-        return (string) $response;
+        $document = new \DOMDocument();
+        $document->resolveExternals = false;
+        $document->substituteEntities = false;
+        $previousErrorMode = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+
+        try {
+            if (!$document->loadXML($xml, LIBXML_NONET) || $document->doctype !== null) {
+                throw new SiiException('El servicio SII devolvió XML inválido o inseguro.');
+            }
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousErrorMode);
+        }
+
+        return $document;
+    }
+
+    private function findStringReturn(\DOMNode $node): ?string
+    {
+        if ($node instanceof \DOMElement && preg_match('/Return$/', $node->localName) === 1) {
+            return $node->textContent;
+        }
+
+        foreach ($node->childNodes as $child) {
+            $found = $this->findStringReturn($child);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    private function findElementText(\DOMNode $node, string $localName): ?string
+    {
+        $element = $this->findElement($node, $localName);
+
+        return $element instanceof \DOMElement ? trim($element->textContent) : null;
+    }
+
+    private function findElement(\DOMNode $node, string $localName): ?\DOMElement
+    {
+        if ($node instanceof \DOMElement && $node->localName === $localName) {
+            return $node;
+        }
+
+        foreach ($node->childNodes as $child) {
+            $found = $this->findElement($child, $localName);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    private function assertNoSoapFault(\DOMDocument $document): void
+    {
+        if ($this->findElement($document, 'Fault') instanceof \DOMElement) {
+            throw new SiiException('El servicio SII devolvió un error SOAP.');
+        }
     }
 }

@@ -49,16 +49,19 @@ use SiiDte\Exceptions\SiiException;
  */
 class CertificateStore
 {
-    private string $certPath;
+    private ?string $certPath = null;
     private string $certPassword;
-    private ?array $parsedCert = null;
+    private string $pkcs12Data;
+    /** @var array<string, mixed>|null */
+    private ?array $certificateInfo = null;
+    /** @var \Closure(): \DateTimeImmutable */
+    private \Closure $clock;
 
     /**
      * OPCIÓN B: Carga el certificado desde un archivo en disco.
      *
-     * @param string $certPath     Ruta absoluta al .p12 (FUERA del webroot)
+     * @param string $certPath Ruta absoluta al .p12 (FUERA del webroot)
      * @param string $certPassword Contraseña del certificado
-     * @return self Instancia de CertificateStore
      * @throws SiiException Si el archivo no existe, no es legible, es inseguro o ha vencido
      *
      * Ejemplo de uso correcto:
@@ -66,14 +69,52 @@ class CertificateStore
      *
      * Ejemplo de uso INCORRECTO (¡nunca hacer esto!):
      *   $store = CertificateStore::fromFile('/var/www/html/public/cert.p12', '12345');
+     * @return self Instancia de CertificateStore
      */
-    public static function fromFile(string $certPath, string $certPassword): self
+    public static function fromFile(string $certPath, string $certPassword, ?\Closure $clock = null): self
     {
-        $store = new self();
-        $store->certPath     = $certPath;
-        $store->certPassword = $certPassword;
-        $store->validate();
-        return $store;
+        if (!is_file($certPath) || !is_readable($certPath)) {
+            throw new SiiException('Certificado no encontrado o no legible.');
+        }
+
+        $resolvedPath = realpath($certPath);
+        if ($resolvedPath === false) {
+            throw new SiiException('No se pudo resolver la ruta del certificado.');
+        }
+        self::assertPrivatePath($certPath);
+        self::assertPrivatePath($resolvedPath);
+
+        $content = file_get_contents($resolvedPath);
+        if ($content === false) {
+            throw new SiiException('No se pudo leer el certificado.');
+        }
+
+        return self::fromPkcs12Content($content, $certPassword, $clock, $resolvedPath);
+    }
+
+    /**
+     * Carga y valida el PKCS#12 directamente desde memoria, sin crear archivos temporales.
+     *
+     * @throws SiiException Si el contenido, la contraseña o la vigencia no son válidos
+     */
+    public static function fromBytes(string $pkcs12Data, string $certPassword, ?\Closure $clock = null): self
+    {
+        return self::fromPkcs12Content($pkcs12Data, $certPassword, $clock);
+    }
+
+    /**
+     * Decodifica y carga un PKCS#12 codificado en Base64 sin escribirlo a disco.
+     *
+     * @throws SiiException Si el Base64 no es válido o el certificado no puede validarse
+     */
+    public static function fromBase64(string $base64, string $certPassword, ?\Closure $clock = null): self
+    {
+        $pkcs12Data = base64_decode($base64, true);
+        if ($pkcs12Data === false) {
+            throw new SiiException('El certificado no contiene un base64 válido.');
+        }
+
+        return self::fromBytes($pkcs12Data, $certPassword, $clock);
     }
 
     /**
@@ -86,42 +127,27 @@ class CertificateStore
      * Para generar el base64 del .p12:
      *   base64 -w 0 mi_certificado.p12
      *
-     * @param string $b64EnvVar   Nombre de la env var con el cert en base64 (default: SII_CERT_B64)
-     * @param string $passEnvVar  Nombre de la env var con la contraseña (default: SII_CERT_PASS)
-     * @return self Instancia de CertificateStore
+     * @param string $b64EnvVar Nombre de la env var con el cert en base64 (default: SII_CERT_B64)
+     * @param string $passEnvVar Nombre de la env var con la contraseña (default: SII_CERT_PASS)
      * @throws SiiException Si las variables de entorno no están definidas o el base64 es inválido
+     * @return self Instancia de CertificateStore
      */
     public static function fromEnv(
         string $b64EnvVar  = 'SII_CERT_B64',
-        string $passEnvVar = 'SII_CERT_PASS'
+        string $passEnvVar = 'SII_CERT_PASS',
+        ?\Closure $clock = null,
     ): self {
         $b64  = getenv($b64EnvVar);
         $pass = getenv($passEnvVar);
 
-        if (!$b64 || !$pass) {
+        if ($b64 === false || $b64 === '' || $pass === false) {
             throw new SiiException(
                 "Las variables de entorno {$b64EnvVar} y/o {$passEnvVar} no están definidas. "
-                . "Agrégalas a tu .env o al entorno del servidor."
+                . 'Agrégalas a tu .env o al entorno del servidor.'
             );
         }
 
-        $certContent = base64_decode($b64, strict: true);
-        if ($certContent === false) {
-            throw new SiiException("La variable {$b64EnvVar} no contiene un base64 válido.");
-        }
-
-        // Escribir temporalmente en /tmp con permisos 600
-        $tmpPath = sys_get_temp_dir() . '/sii_cert_' . md5($b64) . '.p12';
-        if (!file_exists($tmpPath)) {
-            file_put_contents($tmpPath, $certContent);
-            chmod($tmpPath, 0o600);
-        }
-
-        $store = new self();
-        $store->certPath     = $tmpPath;
-        $store->certPassword = $pass;
-        $store->validate();
-        return $store;
+        return self::fromBase64($b64, $pass, $clock);
     }
 
     /**
@@ -131,7 +157,20 @@ class CertificateStore
      */
     public function getPath(): string
     {
+        if ($this->certPath === null) {
+            throw new SiiException('El certificado se cargó en memoria y no tiene una ruta de archivo.');
+        }
+
         return $this->certPath;
+    }
+
+    /**
+     * Entrega la copia PKCS#12 validada que debe mantenerse confidencial.
+     * Se usa internamente para inicializar el firmador sin volver a leer el archivo.
+     */
+    public function getPkcs12Data(): string
+    {
+        return $this->pkcs12Data;
     }
 
     /**
@@ -152,25 +191,26 @@ class CertificateStore
      */
     public function getInfo(): array
     {
-        if ($this->parsedCert !== null) {
-            return $this->parsedCert;
+        $certInfo = $this->certificateInfo;
+        if ($certInfo === null) {
+            throw new SiiException('No hay información validada del certificado.');
         }
 
-        $content = file_get_contents($this->certPath);
-        openssl_pkcs12_read($content, $certs, $this->certPassword);
+        $now = $this->clock()->getTimestamp();
+        $validFrom = (int) $certInfo['validFrom_time_t'];
+        $validTo = (int) $certInfo['validTo_time_t'];
 
-        $certInfo = openssl_x509_parse($certs['cert'] ?? '');
-
-        $this->parsedCert = [
+        return [
             'subject'      => $certInfo['subject'] ?? [],
             'issuer'       => $certInfo['issuer'] ?? [],
-            'valid_from'   => date('Y-m-d H:i:s', $certInfo['validFrom_time_t'] ?? 0),
-            'valid_to'     => date('Y-m-d H:i:s', $certInfo['validTo_time_t'] ?? 0),
-            'dias_vigencia' => (int) (($certInfo['validTo_time_t'] - time()) / 86400),
-            'vencido'      => time() > ($certInfo['validTo_time_t'] ?? 0),
+            'valid_from'   => date('Y-m-d H:i:s', $validFrom),
+            'valid_to'     => date('Y-m-d H:i:s', $validTo),
+            'dias_vigencia' => (int) (($validTo - $now) / 86400),
+            'vigente_desde' => $now >= $validFrom,
+            'aun_no_vigente' => $now < $validFrom,
+            'vencido'      => $now > $validTo,
+            'vigente'      => $now >= $validFrom && $now <= $validTo,
         ];
-
-        return $this->parsedCert;
     }
 
     /**
@@ -183,59 +223,105 @@ class CertificateStore
     public function venceProximo(int $dias = 30): bool
     {
         $info = $this->getInfo();
+
         return $info['dias_vigencia'] < $dias;
     }
 
-
-    private function __construct() {}
+    private function __construct(?\Closure $clock = null)
+    {
+        $this->clock = $clock ?? static fn (): \DateTimeImmutable => new \DateTimeImmutable();
+    }
 
     /**
      * Valida la integridad y seguridad del certificado.
      *
      * @throws SiiException Si el certificado no es válido o es inseguro
-     * @return void
      */
-    private function validate(): void
+    private static function fromPkcs12Content(
+        string $content,
+        string $certPassword,
+        ?\Closure $clock,
+        ?string $certPath = null,
+    ): self {
+        $store = new self($clock);
+        $store->certPath = $certPath;
+        $store->certPassword = $certPassword;
+        $store->pkcs12Data = $content;
+        $store->validatePkcs12();
+
+        return $store;
+    }
+
+    /**
+     * @throws SiiException Si el PKCS#12, la clave privada o sus fechas no son válidas
+     */
+    private function validatePkcs12(): void
     {
-        if (!file_exists($this->certPath)) {
-            throw new SiiException("Certificado no encontrado en: {$this->certPath}");
+        self::clearOpenSslErrors();
+
+        if (!@openssl_pkcs12_read($this->pkcs12Data, $certs, $this->certPassword)) {
+            self::clearOpenSslErrors();
+
+            throw new SiiException('No se pudo abrir el certificado PKCS#12. Verifica el archivo y la contraseña.');
         }
 
-        if (!is_readable($this->certPath)) {
-            throw new SiiException(
-                "El certificado no tiene permisos de lectura: {$this->certPath}\n"
-                . "Ejecuta: chmod 640 {$this->certPath}"
-            );
+        $certificate = $certs['cert'] ?? null;
+        $privateKey = $certs['pkey'] ?? null;
+        if (!is_string($certificate) || !is_string($privateKey)) {
+            throw new SiiException('El PKCS#12 no contiene un certificado y una clave privada utilizables.');
         }
 
-        // Advertencia si está en una ruta pública común
-        $publicPaths = ['/public/', '/www/', '/html/', '/htdocs/', '/webroot/'];
-        foreach ($publicPaths as $pub) {
-            if (str_contains($this->certPath, $pub)) {
-                throw new SiiException(
-                    "⚠️  RIESGO DE SEGURIDAD: El certificado está en una ruta pública ({$this->certPath}). "
-                    . "Muévelo fuera del webroot, por ejemplo a /var/secure/certs/"
-                );
+        self::assertMatchingKey($certificate, $privateKey);
+
+        $certInfo = @openssl_x509_parse($certificate);
+        if ($certInfo === false
+            || !isset($certInfo['validFrom_time_t'], $certInfo['validTo_time_t'])
+            || !is_int($certInfo['validFrom_time_t'])
+            || !is_int($certInfo['validTo_time_t'])
+            || $certInfo['validTo_time_t'] < $certInfo['validFrom_time_t']
+        ) {
+            throw new SiiException('No se pudieron validar las fechas del certificado.');
+        }
+
+        $this->certificateInfo = $certInfo;
+        $now = $this->clock()->getTimestamp();
+        if ($now < $certInfo['validFrom_time_t']) {
+            throw new SiiException('El certificado digital aún no está vigente.');
+        }
+        if ($now > $certInfo['validTo_time_t']) {
+            throw new SiiException('El certificado digital ha vencido.');
+        }
+    }
+
+    private function clock(): \DateTimeImmutable
+    {
+        return ($this->clock)();
+    }
+
+    private static function assertMatchingKey(string $certificate, string $privateKey): void
+    {
+        if (!@openssl_x509_check_private_key($certificate, $privateKey)) {
+            self::clearOpenSslErrors();
+
+            throw new SiiException('La clave privada no corresponde al certificado del PKCS#12.');
+        }
+    }
+
+    private static function clearOpenSslErrors(): void
+    {
+        while (openssl_error_string() !== false) {
+        }
+    }
+
+    private static function assertPrivatePath(string $resolvedPath): void
+    {
+        $segments = preg_split('~[\\\\/]+~', strtolower($resolvedPath));
+        $publicDirectoryNames = ['public', 'www', 'web', 'html', 'htdocs', 'webroot'];
+
+        foreach ($segments ?: [] as $segment) {
+            if (in_array($segment, $publicDirectoryNames, true)) {
+                throw new SiiException('El certificado está ubicado en un directorio público; almacénalo fuera del webroot.');
             }
-        }
-
-        $content = file_get_contents($this->certPath);
-        if (!openssl_pkcs12_read($content, $certs, $this->certPassword)) {
-            throw new SiiException(
-                "No se pudo abrir el certificado. Verifica que:\n"
-                . "  - El archivo sea un .p12 / .pfx válido\n"
-                . "  - La contraseña sea correcta\n"
-                . "Error OpenSSL: " . openssl_error_string()
-            );
-        }
-
-        $certInfo = openssl_x509_parse($certs['cert']);
-        if (time() > ($certInfo['validTo_time_t'] ?? 0)) {
-            $vencio = date('Y-m-d', $certInfo['validTo_time_t']);
-            throw new SiiException(
-                "El certificado digital venció el {$vencio}. "
-                . "Renuévalo con tu proveedor (E-CERT Chile, E-Sign, etc.)."
-            );
         }
     }
 }

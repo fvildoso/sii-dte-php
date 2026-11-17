@@ -8,19 +8,9 @@ use SiiDte\Exceptions\SiiException;
 use SiiDte\Utils\RutHelper;
 
 /**
- * Construye el XML de cualquier tipo de DTE según el estándar SII v1.0.
+ * Genera un borrador XML para previsualización, no un DTE listo para emitir.
  *
- * ─── LO QUE HACE ESTA CLASE ────────────────────────────────────────────────
- *   ✅ Genera XML válido para los 12 tipos de DTE soportados
- *   ✅ Calcula automáticamente neto, IVA y total
- *   ✅ Maneja ítems exentos y afectos en el mismo documento
- *   ✅ Incluye campos especiales por tipo (traslado, exportación, liquidación)
- *   ✅ Valida campos requeridos antes de generar
- *
- * ─── LO QUE DEBES PROVEER TÚ ────────────────────────────────────────────────
- *   ❌ El folio (obtenido del FolioManager)
- *   ❌ Los datos del receptor (valida RUT antes con RutHelper::validate())
- *   ❌ Precios: por defecto asume precio CON IVA incluido
+ * No incorpora TED, validación XSD ni una firma XML verificada.
  */
 class DteBuilder
 {
@@ -33,12 +23,12 @@ class DteBuilder
     }
 
     /**
-     * Genera el XML del DTE.
+     * Genera un borrador XML para revisión local.
      *
      * @param int $tipoDte Código del tipo de DTE (ej: 33 para Factura Electrónica)
      * @param array $datos Datos del documento (folio, fecha, receptor, detalle, etc.)
-     * @return string XML generado en formato ISO-8859-1
-     * @throws SiiException Si faltan datos obligatorios o hay inconsistencias
+     * @throws SiiException Si faltan datos o no pueden representarse sin pérdida
+     * @return string Borrador ISO-8859-1, no válido para envío al SII
      */
     public function build(int $tipoDte, array $datos): string
     {
@@ -64,7 +54,12 @@ class DteBuilder
         }
         $xml .= "  </Documento>\n";
         $xml .= "</DTE>\n";
-        return $xml;
+        $latin1 = @iconv('UTF-8', 'ISO-8859-1', $xml);
+        if ($latin1 === false) {
+            throw new SiiException('El borrador contiene caracteres que no pueden representarse en ISO-8859-1.');
+        }
+
+        return $latin1;
     }
 
     /**
@@ -103,6 +98,7 @@ class DteBuilder
             $totales['exento'] = (int) $sumaExenta;
         }
         $totales['total'] = ($totales['neto'] ?? 0) + ($totales['iva'] ?? 0) + ($totales['exento'] ?? 0);
+
         return $totales;
     }
 
@@ -135,47 +131,47 @@ class DteBuilder
             }
         }
         if (DteTypes::esTraslado($tipoDte)) {
-            $h .= "        <IndTraslado>" . ($datos['ind_traslado'] ?? 1) . "</IndTraslado>\n";
+            $h .= '        <IndTraslado>' . ($datos['ind_traslado'] ?? 1) . "</IndTraslado>\n";
         }
         if (DteTypes::esExportacion($tipoDte)) {
-            $h .= "        <IndServicio>" . ($datos['ind_servicio'] ?? 1) . "</IndServicio>\n";
+            $h .= '        <IndServicio>' . ($datos['ind_servicio'] ?? 1) . "</IndServicio>\n";
         }
         $h .= "      </IdDoc>\n";
 
         // Emisor
         $h .= "      <Emisor>\n";
         $h .= "        <RUTEmisor>{$rutEmisor}</RUTEmisor>\n";
-        $h .= "        <RznSoc>" . $this->esc($this->emisor['razon_social']) . "</RznSoc>\n";
-        $h .= "        <GiroEmis>" . $this->esc($this->emisor['giro']) . "</GiroEmis>\n";
+        $h .= '        <RznSoc>' . $this->esc($this->emisor['razon_social']) . "</RznSoc>\n";
+        $h .= '        <GiroEmis>' . $this->esc($this->emisor['giro']) . "</GiroEmis>\n";
         if (!empty($this->emisor['telefono'])) {
-            $h .= "        <Telefono>" . $this->esc($this->emisor['telefono']) . "</Telefono>\n";
+            $h .= '        <Telefono>' . $this->esc($this->emisor['telefono']) . "</Telefono>\n";
         }
         if (!empty($this->emisor['email'])) {
-            $h .= "        <CorreoEmisor>" . $this->esc($this->emisor['email']) . "</CorreoEmisor>\n";
+            $h .= '        <CorreoEmisor>' . $this->esc($this->emisor['email']) . "</CorreoEmisor>\n";
         }
-        $h .= "        <Acteco>" . ($this->emisor['codigo_actividad'] ?? '620900') . "</Acteco>\n";
-        $h .= "        <DirOrigen>" . $this->esc($this->emisor['direccion']) . "</DirOrigen>\n";
-        $h .= "        <CmnaOrigen>" . $this->esc($this->emisor['ciudad']) . "</CmnaOrigen>\n";
+        $h .= '        <Acteco>' . ($this->emisor['codigo_actividad'] ?? '620900') . "</Acteco>\n";
+        $h .= '        <DirOrigen>' . $this->esc($this->emisor['direccion']) . "</DirOrigen>\n";
+        $h .= '        <CmnaOrigen>' . $this->esc($this->emisor['ciudad']) . "</CmnaOrigen>\n";
         $h .= "      </Emisor>\n";
 
         // Receptor
         $h .= "      <Receptor>\n";
         $h .= "        <RUTRecep>{$rutRec}</RUTRecep>\n";
-        $h .= "        <RznSocRecep>" . $this->esc($receptor['razon_social']) . "</RznSocRecep>\n";
+        $h .= '        <RznSocRecep>' . $this->esc($receptor['razon_social']) . "</RznSocRecep>\n";
         if (!empty($receptor['giro'])) {
-            $h .= "        <GiroRecep>" . $this->esc($receptor['giro']) . "</GiroRecep>\n";
+            $h .= '        <GiroRecep>' . $this->esc($receptor['giro']) . "</GiroRecep>\n";
         }
         if (!empty($receptor['email'])) {
-            $h .= "        <CorreoRecep>" . $this->esc($receptor['email']) . "</CorreoRecep>\n";
+            $h .= '        <CorreoRecep>' . $this->esc($receptor['email']) . "</CorreoRecep>\n";
         }
         if (!empty($receptor['direccion'])) {
-            $h .= "        <DirRecep>" . $this->esc($receptor['direccion']) . "</DirRecep>\n";
+            $h .= '        <DirRecep>' . $this->esc($receptor['direccion']) . "</DirRecep>\n";
         }
         if (!empty($receptor['ciudad'])) {
-            $h .= "        <CmnaRecep>" . $this->esc($receptor['ciudad']) . "</CmnaRecep>\n";
+            $h .= '        <CmnaRecep>' . $this->esc($receptor['ciudad']) . "</CmnaRecep>\n";
         }
         if (DteTypes::esExportacion($tipoDte) && !empty($receptor['pais'])) {
-            $h .= "        <CdgPais>" . $this->esc($receptor['pais']) . "</CdgPais>\n";
+            $h .= '        <CdgPais>' . $this->esc($receptor['pais']) . "</CdgPais>\n";
         }
         $h .= "      </Receptor>\n";
 
@@ -184,16 +180,16 @@ class DteBuilder
             $t = $datos['transporte'];
             $h .= "      <Transporte>\n";
             if (!empty($t['patente'])) {
-                $h .= "        <Patente>" . $this->esc($t['patente']) . "</Patente>\n";
+                $h .= '        <Patente>' . $this->esc($t['patente']) . "</Patente>\n";
             }
             if (!empty($t['rut_transportista'])) {
-                $h .= "        <RUTTrans>" . $this->esc($t['rut_transportista']) . "</RUTTrans>\n";
+                $h .= '        <RUTTrans>' . $this->esc($t['rut_transportista']) . "</RUTTrans>\n";
             }
             if (!empty($t['direccion_destino'])) {
-                $h .= "        <DirDest>" . $this->esc($t['direccion_destino']) . "</DirDest>\n";
+                $h .= '        <DirDest>' . $this->esc($t['direccion_destino']) . "</DirDest>\n";
             }
             if (!empty($t['ciudad_destino'])) {
-                $h .= "        <CmnaDest>" . $this->esc($t['ciudad_destino']) . "</CmnaDest>\n";
+                $h .= '        <CmnaDest>' . $this->esc($t['ciudad_destino']) . "</CmnaDest>\n";
             }
             $h .= "      </Transporte>\n";
         }
@@ -201,7 +197,7 @@ class DteBuilder
         // Totales
         $h .= "      <Totales>\n";
         if (DteTypes::esExportacion($tipoDte)) {
-            $h .= "        <TpoMoneda>" . ($datos['moneda'] ?? 'USD') . "</TpoMoneda>\n";
+            $h .= '        <TpoMoneda>' . $this->esc((string) ($datos['moneda'] ?? 'USD')) . "</TpoMoneda>\n";
             $h .= "        <MntTotal>{$totales['total']}</MntTotal>\n";
         } else {
             if (isset($totales['neto'])) {
@@ -211,7 +207,7 @@ class DteBuilder
                 $h .= "        <MntExe>{$totales['exento']}</MntExe>\n";
             }
             if (isset($totales['iva'])) {
-                $h .= "        <TasaIVA>" . self::IVA_TASA . "</TasaIVA>\n";
+                $h .= '        <TasaIVA>' . self::IVA_TASA . "</TasaIVA>\n";
                 $h .= "        <IVA>{$totales['iva']}</IVA>\n";
             }
             if ($tipoDte === DteTypes::FACTURA_COMPRA_ELECTRONICA && isset($totales['iva'])) {
@@ -221,6 +217,7 @@ class DteBuilder
         }
         $h .= "      </Totales>\n";
         $h .= "    </Encabezado>\n";
+
         return $h;
     }
 
@@ -244,27 +241,28 @@ class DteBuilder
         $d .= "      <NroLinDet>{$nroLinea}</NroLinDet>\n";
         if (!empty($item['codigo'])) {
             $tipoCodigo = $item['tipo_codigo'] ?? 'INT1';
-            $d .= "      <CdgItem><TpoCodigo>{$tipoCodigo}</TpoCodigo>"
-                . "<VlrCodigo>" . $this->esc($item['codigo']) . "</VlrCodigo></CdgItem>\n";
+            $d .= '      <CdgItem><TpoCodigo>' . $this->esc((string) $tipoCodigo) . '</TpoCodigo>'
+                . '<VlrCodigo>' . $this->esc($item['codigo']) . "</VlrCodigo></CdgItem>\n";
         }
-        $d .= "      <NmbItem>" . $this->esc($item['nombre']) . "</NmbItem>\n";
+        $d .= '      <NmbItem>' . $this->esc($item['nombre']) . "</NmbItem>\n";
         if (!empty($item['descripcion'])) {
-            $d .= "      <DscItem>" . $this->esc($item['descripcion']) . "</DscItem>\n";
+            $d .= '      <DscItem>' . $this->esc($item['descripcion']) . "</DscItem>\n";
         }
         $d .= "      <QtyItem>{$qty}</QtyItem>\n";
         if (!empty($item['unidad'])) {
-            $d .= "      <UnmdItem>" . $this->esc($item['unidad']) . "</UnmdItem>\n";
+            $d .= '      <UnmdItem>' . $this->esc($item['unidad']) . "</UnmdItem>\n";
         }
-        $d .= "      <PrcItem>" . round($precio) . "</PrcItem>\n";
+        $d .= '      <PrcItem>' . round($precio) . "</PrcItem>\n";
         if ($desc > 0) {
             $d .= "      <DescuentoPct>{$desc}</DescuentoPct>\n";
-            $d .= "      <DescuentoMonto>" . round($precio * $qty * $desc / 100) . "</DescuentoMonto>\n";
+            $d .= '      <DescuentoMonto>' . round($precio * $qty * $desc / 100) . "</DescuentoMonto>\n";
         }
         if ($esExento) {
             $d .= "      <IndExe>1</IndExe>\n";
         }
-        $d .= "      <MontoItem>" . round($monto) . "</MontoItem>\n";
+        $d .= '      <MontoItem>' . round($monto) . "</MontoItem>\n";
         $d .= "    </Detalle>\n";
+
         return $d;
     }
 
@@ -277,17 +275,18 @@ class DteBuilder
     private function buildReferencia(array $ref): string
     {
         $r  = "    <Referencia>\n";
-        $r .= "      <NroLinRef>" . ($ref['nro_linea'] ?? 1) . "</NroLinRef>\n";
-        $r .= "      <TpoDocRef>" . $ref['tipo_doc'] . "</TpoDocRef>\n";
-        $r .= "      <FolioRef>" . $ref['folio'] . "</FolioRef>\n";
-        $r .= "      <FchRef>" . $ref['fecha'] . "</FchRef>\n";
+        $r .= '      <NroLinRef>' . ($ref['nro_linea'] ?? 1) . "</NroLinRef>\n";
+        $r .= '      <TpoDocRef>' . $ref['tipo_doc'] . "</TpoDocRef>\n";
+        $r .= '      <FolioRef>' . $ref['folio'] . "</FolioRef>\n";
+        $r .= '      <FchRef>' . $ref['fecha'] . "</FchRef>\n";
         if (!empty($ref['codigo_ref'])) {
-            $r .= "      <CodRef>" . $ref['codigo_ref'] . "</CodRef>\n";
+            $r .= '      <CodRef>' . $ref['codigo_ref'] . "</CodRef>\n";
         }
         if (!empty($ref['razon'])) {
-            $r .= "      <RazonRef>" . $this->esc($ref['razon']) . "</RazonRef>\n";
+            $r .= '      <RazonRef>' . $this->esc($ref['razon']) . "</RazonRef>\n";
         }
         $r .= "    </Referencia>\n";
+
         return $r;
     }
 
@@ -297,13 +296,42 @@ class DteBuilder
      * @param int $tipoDte Código del tipo de DTE
      * @param array $datos Datos a validar
      * @throws SiiException Si falta algún campo requerido
-     * @return void
      */
     private function validateDatos(int $tipoDte, array $datos): void
     {
+        if (!in_array($tipoDte, DteTypes::todos(), true)) {
+            throw new SiiException("El tipo DTE {$tipoDte} no está anunciado por la biblioteca.");
+        }
+
         foreach (['folio', 'fecha', 'receptor', 'detalle'] as $key) {
             if (empty($datos[$key])) {
                 throw new SiiException("Campo requerido faltante: '{$key}'.");
+            }
+        }
+        if (filter_var($datos['folio'], FILTER_VALIDATE_INT) === false || (int) $datos['folio'] <= 0) {
+            throw new SiiException('El folio del borrador debe ser un entero positivo suministrado externamente.');
+        }
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $datos['fecha']);
+        $dateErrors = \DateTimeImmutable::getLastErrors();
+        if (
+            $date === false
+            || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))
+            || $date->format('Y-m-d') !== $datos['fecha']
+        ) {
+            throw new SiiException('La fecha del DTE debe tener formato AAAA-MM-DD válido.');
+        }
+        $issuerRut = (string) ($this->emisor['rut_emisor'] ?? '') . '-' . (string) ($this->emisor['dv_emisor'] ?? '');
+        if (!RutHelper::validate($issuerRut)) {
+            throw new SiiException('El RUT del emisor del borrador no es válido.');
+        }
+        if (!is_array($datos['receptor'])) {
+            throw new SiiException('El receptor del borrador debe ser un arreglo de datos.');
+        }
+        if (!DteTypes::esExportacion($tipoDte)) {
+            $recipientRut = (string) ($datos['receptor']['rut'] ?? '')
+                . '-' . (string) ($datos['receptor']['dv'] ?? '');
+            if (!RutHelper::validate($recipientRut)) {
+                throw new SiiException('El RUT del receptor del borrador no es válido.');
             }
         }
         if (count($datos['detalle']) === 0) {
@@ -311,10 +339,10 @@ class DteBuilder
         }
         foreach ($datos['detalle'] as $i => $item) {
             if (empty($item['nombre'])) {
-                throw new SiiException("Detalle línea " . ($i + 1) . ": falta 'nombre'.");
+                throw new SiiException('Detalle línea ' . ($i + 1) . ": falta 'nombre'.");
             }
             if (!isset($item['precio_unitario'])) {
-                throw new SiiException("Detalle línea " . ($i + 1) . ": falta 'precio_unitario'.");
+                throw new SiiException('Detalle línea ' . ($i + 1) . ": falta 'precio_unitario'.");
             }
         }
         if (DteTypes::esTraslado($tipoDte) && empty($datos['ind_traslado'])) {
@@ -336,6 +364,10 @@ class DteBuilder
      */
     private function esc(string $text): string
     {
-        return htmlspecialchars($text, ENT_XML1, 'ISO-8859-1');
+        if (preg_match('//u', $text) !== 1) {
+            throw new SiiException('Los textos del borrador deben estar codificados en UTF-8 válido.');
+        }
+
+        return htmlspecialchars($text, ENT_XML1 | ENT_QUOTES, 'UTF-8');
     }
 }
