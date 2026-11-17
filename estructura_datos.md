@@ -1,6 +1,8 @@
-# Estructura de Datos por Tipo de DTE
+# Estructuras de datos heredadas (no son contrato de emisión)
 
-Referencia de los campos que acepta `$client->enviarDte($tipo, $datos)` para cada tipo de documento.
+> **Obsoleto y no normativo.** Los ejemplos de este archivo describen una API anterior y no deben usarse para emitir DTE. `SiiClient::enviarDte()` está bloqueado; `FolioManager` ya no importa CAF ni reserva folios; los ejemplos no están validados contra los XSD actuales. La matriz de estado y el único ejemplo de vista previa se mantienen en [`README.md`](README.md).
+
+Los supuestos antiguos sobre precios con IVA incluido, tasa fija del 19%, campos comunes y referencias pueden ser incorrectos para el tipo de operación. Los montos deben calcularse según el Formato DTE y reglas tributarias aplicables; la biblioteca todavía no implementa esa conformidad.
 
 ---
 
@@ -14,7 +16,7 @@ $datos = [
     'detalle'  => [ ... ],           // Ver sección Detalle
 
     // ─── OPCIONALES ───────────────────────────────────────────
-    'folio'    => 100,               // Omitir si usas FolioManager (se asigna automático)
+    'folio'    => 100,               // Solo para borrador; debe suministrarlo la aplicación
     'referencias' => [ ... ],        // Ver sección Referencias (obligatorio en NC y ND)
 ];
 ```
@@ -57,7 +59,7 @@ $datos = [
     [
         // REQUERIDOS
         'nombre'          => 'Nombre del producto/servicio',   // máx 80 chars
-        'precio_unitario' => 119000,   // precio CON IVA incluido (default)
+        'precio_unitario' => 119000,   // valor de ejemplo; no implica regla tributaria
 
         // OPCIONALES
         'codigo'          => 'SKU-001',    // Código interno de producto
@@ -72,11 +74,7 @@ $datos = [
 ]
 ```
 
-**Sobre precios:** La librería asume que el `precio_unitario` **incluye IVA**. El neto se calcula dividiendo por 1.19. Si tu precio es neto (sin IVA), multiplica por 1.19 antes de pasarlo:
-```php
-$precioNeto = 100000;
-'precio_unitario' => (int) round($precioNeto * 1.19)  // → 119000
-```
+**No usar este cálculo heredado para determinar montos tributarios.** El código usa `float`, tasa fija y un supuesto de precio incluido en IVA; no cubre todos los regímenes, monedas, impuestos ni redondeos. No se ofrece una conversión fiable de precio neto a bruto.
 
 ---
 
@@ -292,16 +290,6 @@ Solo posible en facturas tipo 33 y 34:
 
 ---
 
-## Notas sobre el cálculo de montos
+## Estado actual
 
-- Los precios se ingresan **con IVA incluido** por defecto
-- La librería calcula el neto dividiendo por 1.19 y redondea al peso
-- El IVA se calcula como `monto_afecto - neto` (para evitar diferencias de redondeo)
-- El total = neto + IVA + exento
-
-Si necesitas ingresar precios netos (sin IVA):
-```php
-$precioNeto = 100000;
-// Convierte a precio con IVA antes de pasar:
-'precio_unitario' => (int) round($precioNeto * 1.19)
-```
+Estos ejemplos y estructuras son material histórico. No se verificaron contra el Formato DTE versión 2.5 (2026-02), no pasan validación XSD y no acreditan tipos de DTE conformes. Para un borrador actual se requiere un folio explícito; no se produce un DTE listo para enviar.

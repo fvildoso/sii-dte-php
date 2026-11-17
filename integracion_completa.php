@@ -1,11 +1,10 @@
 <?php
 
 /**
- * Ejemplo completo de integración SII DTE PHP
- * Muestra cómo conectar todos los componentes: certificado, folios, BD, envío y PDF.
+ * Ejemplo histórico deshabilitado: no representa un flujo conforme ni debe ejecutarse.
  */
 
-require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/vendor/autoload.php';
 
 use SiiDte\SiiClient;
 use SiiDte\Document\DteTypes;
@@ -14,6 +13,9 @@ use SiiDte\Storage\CertificateStore;
 use SiiDte\Storage\DteRepository;
 use SiiDte\Exceptions\SiiException;
 use SiiDte\Exceptions\FolioAgotadoException;
+
+fwrite(STDERR, "Ejemplo heredado deshabilitado. Use la vista previa segura de README.md; no hay emisión habilitada.\n");
+exit(1);
 
 // =============================================================================
 // PASO 1 — Cargar el certificado digital de forma segura

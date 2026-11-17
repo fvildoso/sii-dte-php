@@ -6,11 +6,14 @@ Este documento contiene las reglas de arquitectura, patrones de diseño y restri
 
 ## 1. Arquitectura del Paquete
 
-- **Fachada principal:** `SiiDte\SiiClient` orquesta todo el flujo (token, XML, firma, sobre, web service y persistencia).
+- **Fachada principal:** `SiiDte\SiiClient` conserva APIs heredadas, pero `enviarDte()` está bloqueado. `previsualizarXml()` solo genera un borrador no enviable.
 - **Inyección de dependencias opcionales:**
-  - `FolioManager`: Asigna folios atómicamente desde la BD usando transacciones y `SELECT FOR UPDATE`.
-  - `DteRepository`: Registra los DTE emitidos, XML final, Track ID y estado devuelto por el SII.
-- **Tipos de documento:** Siempre referenciar mediante las constantes de `SiiDte\Document\DteTypes` (`DteTypes::FACTURA_ELECTRONICA`, `DteTypes::BOLETA_ELECTRONICA`, etc.).
+  - `FolioManager`: API heredada deshabilitada; no importar CAF, reservar, consultar o anular folios con ella. El esquema no aísla RUT/ambiente ni verifica FRMA.
+  - `DteRepository`: Persistencia heredada opcional; no sustituye la reserva compartida ni la persistencia previa al envío a cargo de la aplicación.
+- **CAF:** `SiiDte\Folio\CafInspector` inspecciona estructura/metadatos y correspondencia de llaves; no verifica ni genera FRMA y no busca llaves públicas SII por IDK. Conserva el CAF suministrado literalmente al preparar el TED.
+- **TED:** `SiiDte\Document\TedBuilder` solo genera/verifica localmente FRMT para factura 33; FRMA se copia desde el CAF sin verificación local. La preparación experimental no equivale a aceptación ni habilita `SiiClient::enviarDte()`.
+- **Sobres y transporte:** `SiiDte\Envelope\EnvelopeBuilder` genera un sobre individual y requiere el RUT de `RutEnvia` correcto; `HttpTransport` es inyectable para autenticación/envío/consultas. Las respuestas y firmas locales simuladas no equivalen a pruebas en certificación.
+- **Tipos de documento:** Las constantes de `SiiDte\Document\DteTypes` identifican códigos, no soporte integral.
 - **Almacén de Certificados:** `SiiDte\Storage\CertificateStore` previene la lectura de certificados ubicados en rutas web públicas (`public/`, `www/`, `web/`).
 
 ---
@@ -50,58 +53,17 @@ $client = new SiiClient([
 
 ---
 
-## 3. Estructuras de Datos Requeridas por Tipo de DTE
+## 3. Estructuras de Datos
 
-### Factura Electrónica (33) / Factura Exenta (34)
-```php
-[
-    'fecha'    => 'YYYY-MM-DD',
-    'receptor' => [
-        'rut'          => '12345678', // Sin puntos ni guión
-        'dv'           => '9',
-        'razon_social' => 'Razón Social Receptor',
-        'giro'         => 'Giro del negocio',
-        'direccion'    => 'Dirección receptor',
-        'ciudad'       => 'Ciudad receptor',
-    ],
-    'detalle' => [
-        [
-            'codigo'          => 'SKU-001',
-            'nombre'          => 'Nombre del producto o servicio',
-            'cantidad'        => 1.0,
-            'precio_unitario' => 10000, // Precio neto sin formato
-            'exento'          => false, // true para ítems exentos de IVA
-        ],
-    ],
-]
-```
-
-### Boleta Electrónica (39) / Boleta Exenta (41)
-- No requiere giro ni dirección obligatoria del receptor si es consumidor final anónimo.
-- Receptor genérico estándar: RUT `66666666-6` o los datos del comprador.
-
-### Nota de Crédito (61) / Nota de Débito (56)
-- Requiere array `referencias`:
-```php
-[
-    // ... campos estándar ...
-    'referencias' => [
-        [
-            'tipo_documento'   => 33,           // Tipo de DTE referenciado
-            'folio'            => 1234,         // Folio del DTE original
-            'fecha_documento'  => '2024-01-15', // Fecha del DTE original
-            'codigo_referencia'=> 1,            // 1: Anula, 2: Corrige texto, 3: Corrige montos
-            'razon_referencia' => 'Anula Factura por error en monto',
-        ],
-    ],
-]
-```
+No se declara un payload tributario integral por tipo. El contrato de `previsualizarXml()` requiere un folio explícito para el borrador, pero sus campos y cálculos no son un formato oficial validado. No uses las estructuras antiguas de `estructura_datos.md` como contrato de emisión; revisa el Formato DTE y los XSD vigentes del SII.
 
 ---
 
 ## 4. Buenas Prácticas y Manejo de Errores
 
-1. **Excepciones de Dominio:** Todas las excepciones lanzadas por la librería extienden o son instancias de `SiiDte\Exceptions\SiiException`.
-2. **Folios:** Usar siempre `FolioManager` para evitar condiciones de carrera en entornos concurrentes. Si un folio se agota, capturar `SiiDte\Exceptions\FolioAgotadoException`.
-3. **Persistencia:** Si se usa Laravel, Symfony o Doctrine, usar las migraciones provistas en `database/migrations/` o el script unificado `database/migrations.sql`.
-4. **Verificación de Entorno:** Nunca hardcodear credenciales ni rutas de certificados. Utilizar `.env` según los estándares definidos en `.env.example`.
+1. **Excepciones de dominio:** Captura `SiiDte\Exceptions\SiiException` sin registrar datos sensibles.
+2. **Folios:** La aplicación reserva transaccionalmente por RUT, ambiente y tipo, aplica una restricción única por folio y pasa el folio explícitamente. No uses `FolioManager` ni sus migraciones para un almacén compartido.
+3. **Persistencia y concurrencia:** La aplicación determina visibilidad/autorización entre instancias, persiste la intención antes del envío y concilia resultados ambiguos. No asumas idempotencia ni reenvíes automáticamente.
+4. **Estado:** `EPR` describe procesamiento del sobre, no aceptación de cada documento.
+5. **Verificación de entorno:** Nunca hardcodees credenciales ni rutas de certificados. Usa `.env` según `.env.example`.
+6. **Emisión:** No exijas al emisor generar o verificar FRMA: es parte del CAF firmado por el SII y debe conservarse sin alteración. No retires la barrera de `enviarDte()` hasta completar la implementación tributaria y la validación local integral, y obtener evidencia en certificación; producción requiere además autorización y controles operativos propios.
