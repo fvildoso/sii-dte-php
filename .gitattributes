@@ -1,0 +1,2 @@
+# Los XSD oficiales se verifican por SHA-256: deben conservar sus bytes originales.
+schemas/** -text
