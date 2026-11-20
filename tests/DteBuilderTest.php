@@ -108,7 +108,7 @@ class DteBuilderTest extends TestCase
     public function testRechazaCaracteresNoRepresentablesSinPerdidaSilenciosa(): void
     {
         $this->expectException(SiiException::class);
-        (new DteBuilder($this->config))->build(DteTypes::FACTURA_ELECTRONICA, [
+        new DteBuilder($this->config)->build(DteTypes::FACTURA_ELECTRONICA, [
             'folio' => 3,
             'fecha' => '2024-01-15',
             'receptor' => ['rut' => '98765432', 'dv' => '5', 'razon_social' => 'Cliente'],

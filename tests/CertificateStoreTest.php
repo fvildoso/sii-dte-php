@@ -222,12 +222,12 @@ class CertificateStoreTest extends TestCase
         $atNotBefore = CertificateStore::fromBytes(
             $pkcs12,
             $password,
-            static fn (): \DateTimeImmutable => new \DateTimeImmutable('@' . $validFrom)
+            static fn(): \DateTimeImmutable => new \DateTimeImmutable('@' . $validFrom)
         );
         $atNotAfter = CertificateStore::fromBytes(
             $pkcs12,
             $password,
-            static fn (): \DateTimeImmutable => new \DateTimeImmutable('@' . $validTo)
+            static fn(): \DateTimeImmutable => new \DateTimeImmutable('@' . $validTo)
         );
 
         $this->assertTrue($atNotBefore->getInfo()['vigente']);
@@ -237,7 +237,7 @@ class CertificateStoreTest extends TestCase
             CertificateStore::fromBytes(
                 $pkcs12,
                 $password,
-                static fn (): \DateTimeImmutable => new \DateTimeImmutable('@' . ($validFrom - 1))
+                static fn(): \DateTimeImmutable => new \DateTimeImmutable('@' . ($validFrom - 1))
             );
             $this->fail('El certificado aún no válido debía rechazarse.');
         } catch (SiiException $exception) {
@@ -248,7 +248,7 @@ class CertificateStoreTest extends TestCase
             CertificateStore::fromBytes(
                 $pkcs12,
                 $password,
-                static fn (): \DateTimeImmutable => new \DateTimeImmutable('@' . ($validTo + 1))
+                static fn(): \DateTimeImmutable => new \DateTimeImmutable('@' . ($validTo + 1))
             );
             $this->fail('El certificado vencido debía rechazarse.');
         } catch (SiiException $exception) {
@@ -263,7 +263,7 @@ class CertificateStoreTest extends TestCase
         $publicDirectory = $directory . DIRECTORY_SEPARATOR . 'PUBLIC';
         $path = $publicDirectory . DIRECTORY_SEPARATOR . 'certificate.p12';
 
-        self::assertTrue(mkdir($publicDirectory, 0777, true));
+        self::assertTrue(mkdir($publicDirectory, 0o777, true));
         self::assertNotFalse(file_put_contents($path, $pkcs12));
 
         try {

@@ -65,7 +65,7 @@ class SiiWebServiceTest extends TestCase
             . '<getEstDteResponse><getEstDteReturn>' . htmlspecialchars($inner, ENT_XML1, 'UTF-8')
             . '</getEstDteReturn></getEstDteResponse></soap:Body></soap:Envelope>';
         $transport = new SiiWebServiceTestTransport([new HttpResponse(200, $soap)]);
-        $result = (new SiiWebService('certificacion', $transport))->queryDte(
+        $result = new SiiWebService('certificacion', $transport)->queryDte(
             '97975000',
             '5',
             '8414240',
@@ -83,8 +83,8 @@ class SiiWebServiceTest extends TestCase
         self::assertSame('https://maullin.sii.cl/DTEWS/QueryEstDte.jws', $transport->requests[0]['url']);
         $body = $transport->requests[0]['body'];
         foreach (['RutConsultante' => '60803000', 'DvConsultante' => 'K', 'RutCompania' => '97975000',
-                  'DvCompania' => '5', 'RutReceptor' => '8414240', 'DvReceptor' => '9', 'TipoDte' => '33',
-                  'FolioDte' => '27', 'FechaEmisionDte' => '15012024', 'MontoDte' => '119000'] as $name => $value) {
+            'DvCompania' => '5', 'RutReceptor' => '8414240', 'DvReceptor' => '9', 'TipoDte' => '33',
+            'FolioDte' => '27', 'FechaEmisionDte' => '15012024', 'MontoDte' => '119000'] as $name => $value) {
             self::assertStringContainsString('>' . $value . '</' . $name . '>', $body);
         }
     }
@@ -148,11 +148,11 @@ class SiiWebServiceTest extends TestCase
     public function testRespuestaSinTrackOContradictoriaEsAmbigua(): void
     {
         foreach (['<RECEPCIONDTE><STATUS>0</STATUS></RECEPCIONDTE>',
-                  '<RECEPCIONDTE><STATUS>7</STATUS><TRACKID>123</TRACKID></RECEPCIONDTE>'] as $xml) {
+            '<RECEPCIONDTE><STATUS>7</STATUS><TRACKID>123</TRACKID></RECEPCIONDTE>'] as $xml) {
             $transport = new SiiWebServiceTestTransport([new HttpResponse(200, $xml)]);
 
             try {
-                (new SiiWebService('certificacion', $transport))->uploadDte('97975000', '5', '<EnvioDTE/>', 'token-test');
+                new SiiWebService('certificacion', $transport)->uploadDte('97975000', '5', '<EnvioDTE/>', 'token-test');
                 self::fail('La recepción contradictoria o incompleta debe ser ambigua.');
             } catch (TransportException $exception) {
                 self::assertTrue($exception->outcomeMayBeUnknown);
@@ -168,7 +168,7 @@ class SiiWebServiceTest extends TestCase
         ]);
         self::assertSame(
             '0069186080',
-            (new SiiWebService('certificacion', $transport))->uploadDte('97975000', '5', '<EnvioDTE/>', 'token-test')
+            new SiiWebService('certificacion', $transport)->uploadDte('97975000', '5', '<EnvioDTE/>', 'token-test')
         );
     }
 }
@@ -179,9 +179,7 @@ final class SiiWebServiceTestTransport implements HttpTransport
     public array $requests = [];
 
     /** @param list<HttpResponse|\Throwable> $responses */
-    public function __construct(private array $responses)
-    {
-    }
+    public function __construct(private array $responses) {}
 
     public function post(string $url, string $body, array $headers, int $timeoutSeconds): HttpResponse
     {

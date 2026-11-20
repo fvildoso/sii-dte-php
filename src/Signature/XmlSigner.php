@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SiiDte\Signature;
 
+use SiiDte\Document\DteTypes;
 use SiiDte\Exceptions\SiiException;
 use SiiDte\Storage\CertificateStore;
 use SiiDte\Utils\XmlFragment;
@@ -59,10 +60,14 @@ class XmlSigner
             throw new SiiException('La raíz del XML no es un DTE del SII.');
         }
 
-        $documentNodes = $this->directChildren($root, 'Documento', self::SII_NAMESPACE);
-        if (count($documentNodes) !== 1) {
-            throw new SiiException('El DTE debe contener exactamente un nodo Documento directo.');
+        $documentNodes = [];
+        foreach (DteTypes::NODOS_DOCUMENTO as $nodeName) {
+            array_push($documentNodes, ...$this->directChildren($root, $nodeName, self::SII_NAMESPACE));
         }
+        if (count($documentNodes) !== 1) {
+            throw new SiiException('El DTE debe contener exactamente un nodo Documento, Liquidacion o Exportaciones directo.');
+        }
+        $documentName = $documentNodes[0]->localName;
 
         if ($root->getElementsByTagNameNS(self::DSIG_NAMESPACE, 'Signature')->length > 0) {
             throw new SiiException('El DTE ya contiene una firma XMLDSig.');
@@ -70,12 +75,12 @@ class XmlSigner
 
         $target = $documentNodes[0];
         $id = $this->getUniqueTargetId($doc, $target);
-        $caf = XmlFragment::extract($xml, ['DTE', 'Documento', 'TED', 'DD', 'CAF']);
+        $caf = XmlFragment::extract($xml, ['DTE', $documentName, 'TED', 'DD', 'CAF']);
         $signedXml = $this->signTarget($doc, $target, $root, $id);
 
         return $caf === null
             ? $signedXml
-            : XmlFragment::replace($signedXml, ['DTE', 'Documento', 'TED', 'DD', 'CAF'], $caf);
+            : XmlFragment::replace($signedXml, ['DTE', $documentName, 'TED', 'DD', 'CAF'], $caf);
     }
 
     /**
@@ -114,13 +119,19 @@ class XmlSigner
         $target = $setNodes[0];
         $id = $this->getUniqueTargetId($doc, $target);
         $rootName = $root->localName;
-        $cafPath = [$rootName, 'SetDTE', 'DTE', 'Documento', 'TED', 'DD', 'CAF'];
-        $originalCafs = XmlFragment::extractAll($xml, $cafPath);
+        $originalCafs = [];
+        foreach (DteTypes::NODOS_DOCUMENTO as $nodeName) {
+            $cafPath = [$rootName, 'SetDTE', 'DTE', $nodeName, 'TED', 'DD', 'CAF'];
+            $originalCafs[$nodeName] = [$cafPath, XmlFragment::extractAll($xml, $cafPath)];
+        }
         $signedXml = $this->signTarget($doc, $target, $root, $id);
+        foreach ($originalCafs as [$cafPath, $cafs]) {
+            if ($cafs !== []) {
+                $signedXml = XmlFragment::replaceAll($signedXml, $cafPath, $cafs);
+            }
+        }
 
-        return $originalCafs === []
-            ? $signedXml
-            : XmlFragment::replaceAll($signedXml, $cafPath, $originalCafs);
+        return $signedXml;
     }
 
     /**

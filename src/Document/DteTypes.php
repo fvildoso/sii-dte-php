@@ -32,6 +32,9 @@ class DteTypes
     public const NOTA_DEBITO_EXPORTACION          = 111; // Ajuste exportación (aumento)
     public const NOTA_CREDITO_EXPORTACION         = 112; // Ajuste exportación (disminución)
 
+    /** Nombres del elemento raíz del documento según el XSD: DTE/Documento, Liquidacion (43), Exportaciones (110-112). */
+    public const NODOS_DOCUMENTO = ['Documento', 'Liquidacion', 'Exportaciones'];
+
     // Metadatos por tipo
 
     private const META = [

@@ -72,7 +72,7 @@ class TedBuilderTest extends TestCase
             '2024-01-15T12:28:32'
         );
         $signedDte = $this->signer()->signDte($dte);
-        (new SiiSchemaValidator())->validate($signedDte, 'dte');
+        new SiiSchemaValidator()->validate($signedDte, 'dte');
 
         $result = $this->builder()->verify($signedDte);
         self::assertTrue($result['frmt_verificada']);
@@ -148,8 +148,8 @@ class TedBuilderTest extends TestCase
             $envelopeVerifier->allowedDigestAlgorithms = [XMLSecurityDSig::SHA1];
             self::assertArrayHasKey($id, $envelopeVerifier->verifyDocument($key, $envelopeDocument, $position));
         }
-        (new SiiSchemaValidator())->validate($signed, 'dte');
-        (new SiiSchemaValidator())->validate($signedEnvelope, 'envio_dte');
+        new SiiSchemaValidator()->validate($signed, 'dte');
+        new SiiSchemaValidator()->validate($signedEnvelope, 'envio_dte');
     }
 
     public function testVectorOficialSiiVerificaFrmtYDetectaFirmaAlterada(): void
@@ -194,7 +194,7 @@ class TedBuilderTest extends TestCase
             'rut' => '8414240', 'dv' => '9', 'razon_social' => 'Cliente café & té',
             'giro' => 'Comercio', 'direccion' => 'Calle Test 1', 'ciudad' => 'Santiago',
         ];
-        $invoice = (new Invoice33Builder($issuer))->build(27, [
+        $invoice = new Invoice33Builder($issuer)->build(27, [
             'fecha' => '2024-01-15', 'tasa_iva' => '19', 'receptor' => $receiver,
             'detalle' => [['nombre' => 'Café', 'cantidad' => '2.5', 'precio_unitario' => '400']],
         ]);
@@ -211,7 +211,7 @@ class TedBuilderTest extends TestCase
         self::assertFalse($result['frma_verificada']);
         $signer = $this->signer();
         $signed = $signer->signDte($stamped);
-        (new SiiSchemaValidator())->validate($signed, 'dte');
+        new SiiSchemaValidator()->validate($signed, 'dte');
         $envelope = EnvelopeBuilder::build(
             $signed,
             $issuer + ['fecha_resolucion' => '2019-10-18', 'numero_resolucion' => 0],
@@ -221,7 +221,7 @@ class TedBuilderTest extends TestCase
             '60803000-K',
         );
         $envelope = $signer->signEnvelope($envelope);
-        (new SiiSchemaValidator())->validate($envelope, 'envio_dte');
+        new SiiSchemaValidator()->validate($envelope, 'envio_dte');
         self::assertStringNotContainsString('RSASK', $envelope);
         $document = new \DOMDocument();
         self::assertTrue($document->loadXML($envelope, LIBXML_NONET));
@@ -346,20 +346,21 @@ class TedBuilderTest extends TestCase
         );
     }
 
-    public function testRechazaTiposDistintosDeFactura33(): void
+    public function testRechazaTiposNoSoportadosOCafDeOtroTipo(): void
     {
-        $unsupportedDte = str_replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>34</TipoDTE>', $this->dte());
-        self::assertNotSame($this->dte(), $unsupportedDte);
+        $unsupported = str_replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>99</TipoDTE>', $this->dte());
+        try {
+            $this->builder()->addTedToDte($unsupported, $this->authorizationXml(), 27, '2024-01-15T12:28:31', '2024-01-15T12:28:32');
+            self::fail('Debía rechazar el tipo 99.');
+        } catch (SiiException $e) {
+            self::assertStringContainsString('no está soportado', $e->getMessage());
+        }
 
+        // Un tipo soportado, pero con un CAF de otro tipo (33), debe rechazarse.
+        $otroTipo = str_replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>34</TipoDTE>', $this->dte());
         $this->expectException(SiiException::class);
-        $this->expectExceptionMessage('solo implementa localmente el DTE tipo 33');
-        $this->builder()->addTedToDte(
-            $unsupportedDte,
-            $this->authorizationXml(),
-            27,
-            '2024-01-15T12:28:31',
-            '2024-01-15T12:28:32'
-        );
+        $this->expectExceptionMessage('no coincide con el tipo esperado');
+        $this->builder()->addTedToDte($otroTipo, $this->authorizationXml(), 27, '2024-01-15T12:28:31', '2024-01-15T12:28:32');
     }
 
     public function testRechazaSignatureConNamespaceAjeno(): void
@@ -460,7 +461,7 @@ class TedBuilderTest extends TestCase
 
     private function dte(): string
     {
-        return (new DteBuilder([
+        return new DteBuilder([
             'rut_emisor'        => '97975000',
             'dv_emisor'         => '5',
             'razon_social'      => 'Empresa de prueba',
@@ -469,7 +470,7 @@ class TedBuilderTest extends TestCase
             'ciudad'            => 'Santiago',
             'numero_resolucion' => 0,
             'fecha_resolucion'  => '2019-10-18',
-        ]))->build(DteTypes::FACTURA_ELECTRONICA, [
+        ])->build(DteTypes::FACTURA_ELECTRONICA, [
             'folio'    => 27,
             'fecha'    => '2024-01-15',
             'receptor' => [

@@ -6,10 +6,18 @@ namespace SiiDte\Utils;
 
 use SiiDte\Exceptions\TransportException;
 
-final class CurlHttpTransport implements HttpTransport
+final class CurlHttpTransport implements HttpRequestTransport
 {
     public function post(string $url, string $body, array $headers, int $timeoutSeconds): HttpResponse
     {
+        return $this->request('POST', $url, $headers, $body, $timeoutSeconds);
+    }
+
+    public function request(string $method, string $url, array $headers, ?string $body, int $timeoutSeconds): HttpResponse
+    {
+        if (!in_array($method, ['GET', 'POST'], true)) {
+            throw new \InvalidArgumentException('Método HTTP no soportado.');
+        }
         if ($timeoutSeconds < 1) {
             throw new \InvalidArgumentException('El timeout HTTP debe ser positivo.');
         }
@@ -19,9 +27,10 @@ final class CurlHttpTransport implements HttpTransport
             throw new TransportException('No se pudo inicializar el transporte HTTP.', true);
         }
 
-        curl_setopt_array($handle, [
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $body,
+        $options = $method === 'POST'
+            ? [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body ?? '']
+            : [CURLOPT_HTTPGET => true];
+        curl_setopt_array($handle, $options + [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,

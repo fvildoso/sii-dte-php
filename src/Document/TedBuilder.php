@@ -10,20 +10,22 @@ use SiiDte\Utils\RutHelper;
 use SiiDte\Utils\XmlFragment;
 
 /**
- * Construye y verifica localmente el TED de una factura electrónica tipo 33.
- * Copia el CAF suministrado sin modificar sus bytes léxicos; FRMA no se verifica localmente.
+ * Construye y verifica localmente el TED (timbre electrónico) de cualquier DTE soportado.
+ * Copia el CAF suministrado sin modificar sus bytes léxicos; FRMA es del SII y se conserva sin verificar.
  */
 final class TedBuilder
 {
     private const MAX_XML_SIZE = 5 * 1024 * 1024;
     private const SII_NAMESPACE = 'http://www.sii.cl/SiiDte';
+    /** Tipos con vigencia de CAF verificable localmente (derecho a crédito fiscal). */
+    private const TIPOS_CON_VIGENCIA = [33, 43, 46, 56, 61];
+    private const TIPOS_EXPORTACION = [110, 111, 112];
+    private const RAZON_SOCIAL_RECEPTOR_POR_DEFECTO = 'Consumidor final';
 
-    public function __construct(private readonly CafInspector $cafInspector)
-    {
-    }
+    public function __construct(private readonly CafInspector $cafInspector) {}
 
     /**
-     * Agrega TED y TmstFirma a un DTE 33 usando el folio reservado por el consumidor.
+     * Agrega TED y TmstFirma a un DTE usando el folio reservado por el consumidor.
      *
      * @throws SiiException Si el CAF, el DTE, el folio o las llaves no son consistentes
      */
@@ -43,7 +45,7 @@ final class TedBuilder
             throw new SiiException('La raíz XML no corresponde a un DTE del SII.');
         }
 
-        $documentNode = $this->requiredChild($root, 'Documento', self::SII_NAMESPACE);
+        $documentNode = $this->documentNode($root);
         if ($this->hasDirectChildNamed($documentNode, 'TED')
             || $this->hasDirectChildNamed($documentNode, 'TmstFirma')
             || $this->hasDescendantNamed($root, 'Signature')
@@ -52,8 +54,8 @@ final class TedBuilder
         }
 
         $fields = $this->dteFields($documentNode);
-        if ($fields['tipo'] !== 33) {
-            throw new SiiException('TedBuilder solo implementa localmente el DTE tipo 33.');
+        if (!in_array($fields['tipo'], DteDocumentBuilder::TIPOS, true)) {
+            throw new SiiException('El tipo de DTE no está soportado por TedBuilder.');
         }
         if ($folio <= 0 || $fields['folio'] !== $folio) {
             throw new SiiException('El folio externo no coincide con el folio del DTE.');
@@ -68,14 +70,15 @@ final class TedBuilder
         $inspection = $this->cafInspector->validateFolio(
             $authorizationXml,
             $fields['rut_emisor'],
-            33,
+            $fields['tipo'],
             $folio,
             $fields['fecha_emision']
         );
         if (($inspection['llave_timbrado_corresponde'] ?? false) !== true) {
             throw new SiiException('La llave privada de timbrado no corresponde a la llave pública del CAF.');
         }
-        if (($inspection['vigencia'] ?? 'indeterminada') !== 'vigente') {
+        $vigencia = $inspection['vigencia'] ?? 'indeterminada';
+        if (in_array($fields['tipo'], self::TIPOS_CON_VIGENCIA, true) ? $vigencia !== 'vigente' : $vigencia === 'vencido') {
             throw new SiiException('La vigencia local del CAF no está confirmada para la fecha del DTE.');
         }
 
@@ -125,7 +128,7 @@ final class TedBuilder
             $xml = '<?xml version="1.0" encoding="ISO-8859-1"?>' . $xml;
         }
 
-        return XmlFragment::replace($xml, ['DTE', 'Documento', 'TED', 'DD', 'CAF'], $rawCaf);
+        return XmlFragment::replace($xml, ['DTE', $documentNode->localName, 'TED', 'DD', 'CAF'], $rawCaf);
     }
 
     /**
@@ -151,15 +154,15 @@ final class TedBuilder
             throw new SiiException('La raíz XML no corresponde a un DTE del SII.');
         }
 
-        $documentNode = $this->requiredChild($root, 'Documento', self::SII_NAMESPACE);
+        $documentNode = $this->documentNode($root);
         $fields = $this->dteFields($documentNode);
         $ted = $this->requiredChild($documentNode, 'TED', self::SII_NAMESPACE);
         $dd = $this->requiredChild($ted, 'DD', self::SII_NAMESPACE);
         $frmt = $this->requiredChild($ted, 'FRMT', self::SII_NAMESPACE);
-        if ($fields['tipo'] !== 33 || $ted->getAttribute('version') !== '1.0'
+        if (!in_array($fields['tipo'], DteDocumentBuilder::TIPOS, true) || $ted->getAttribute('version') !== '1.0'
             || $frmt->getAttribute('algoritmo') !== 'SHA1withRSA'
         ) {
-            throw new SiiException('El TED no corresponde al formato local implementado para factura 33.');
+            throw new SiiException('El TED no corresponde al formato soportado (SHA1withRSA, versión 1.0).');
         }
 
         $ddTime = $this->requiredChild($dd, 'TSTED', self::SII_NAMESPACE)->textContent;
@@ -173,7 +176,7 @@ final class TedBuilder
         }
 
         $cafNode = $this->requiredChild($dd, 'CAF', self::SII_NAMESPACE);
-        $rawCaf = XmlFragment::extract($dteXml, ['DTE', 'Documento', 'TED', 'DD', 'CAF']);
+        $rawCaf = XmlFragment::extract($dteXml, ['DTE', $documentNode->localName, 'TED', 'DD', 'CAF']);
         if ($rawCaf === null) {
             throw new SiiException('No se pudo leer el fragmento CAF original del TED.');
         }
@@ -293,16 +296,21 @@ final class TedBuilder
         $this->parseDate($issueDate);
         $issuerRut = $this->normalizeRut($this->requiredText($issuer, 'RUTEmisor', self::SII_NAMESPACE));
         $recipientRut = $this->normalizeRut($this->requiredText($recipient, 'RUTRecep', self::SII_NAMESPACE));
-        $recipientName = $this->requiredText($recipient, 'RznSocRecep', self::SII_NAMESPACE, false);
-        $this->assertMaxCharacters($recipientName, 40, 'RznSocRecep');
-        $total = $this->unsignedLong($this->requiredText($totals, 'MntTotal', self::SII_NAMESPACE), 'MntTotal');
+        $recipientNode = $this->directChildren($recipient, 'RznSocRecep', self::SII_NAMESPACE)[0] ?? null;
+        $recipientName = $recipientNode instanceof \DOMElement && trim($recipientNode->textContent) !== ''
+            ? $this->requiredText($recipient, 'RznSocRecep', self::SII_NAMESPACE, false)
+            : self::RAZON_SOCIAL_RECEPTOR_POR_DEFECTO;
+        $recipientName = $this->truncate($recipientName, 40);
+        $totalText = $this->requiredText($totals, 'MntTotal', self::SII_NAMESPACE);
+        $total = in_array($type, self::TIPOS_EXPORTACION, true) && preg_match('/^(0|[1-9]\d*)(\.\d{1,4})?$/D', $totalText) === 1
+            ? $totalText
+            : $this->unsignedLong($totalText, 'MntTotal');
 
         $details = $this->directChildren($documentNode, 'Detalle', self::SII_NAMESPACE);
         if ($details === []) {
             throw new SiiException('El DTE debe contener al menos un detalle para generar IT1.');
         }
-        $firstItem = $this->requiredText($details[0], 'NmbItem', self::SII_NAMESPACE, false);
-        $this->assertMaxCharacters($firstItem, 40, 'IT1');
+        $firstItem = $this->truncate($this->requiredText($details[0], 'NmbItem', self::SII_NAMESPACE, false), 40);
 
         return [
             'tipo'                    => $type,
@@ -466,6 +474,20 @@ final class TedBuilder
         }
     }
 
+    /** El nodo del documento: Documento, Liquidacion (43) o Exportaciones (110-112). */
+    private function documentNode(\DOMElement $root): \DOMElement
+    {
+        $matches = [];
+        foreach (DteTypes::NODOS_DOCUMENTO as $name) {
+            array_push($matches, ...$this->directChildren($root, $name, self::SII_NAMESPACE));
+        }
+        if (count($matches) !== 1) {
+            throw new SiiException('El DTE debe contener exactamente un nodo Documento, Liquidacion o Exportaciones.');
+        }
+
+        return $matches[0];
+    }
+
     private function requiredChild(\DOMElement $parent, string $name, ?string $namespace): \DOMElement
     {
         $matches = $this->directChildren($parent, $name, $namespace);
@@ -561,12 +583,10 @@ final class TedBuilder
         return $value;
     }
 
-    private function assertMaxCharacters(string $value, int $maximum, string $field): void
+    /** Los campos RSR e IT1 del TED contienen los primeros 40 caracteres del dato original. */
+    private function truncate(string $value, int $maximum): string
     {
-        $characters = preg_match_all('/./us', $value);
-        if ($characters === false || $characters < 1 || $characters > $maximum) {
-            throw new SiiException("El campo {$field} debe contener entre 1 y {$maximum} caracteres.");
-        }
+        return mb_strlen($value, 'UTF-8') > $maximum ? mb_substr($value, 0, $maximum, 'UTF-8') : $value;
     }
 
     private function parseDate(string $value): \DateTimeImmutable

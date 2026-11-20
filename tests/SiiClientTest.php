@@ -6,10 +6,12 @@ namespace SiiDte\Tests;
 
 use PHPUnit\Framework\TestCase;
 use SiiDte\Exceptions\SiiException;
-use SiiDte\Folio\FolioManager;
+use SiiDte\Folio\InMemoryFolioProvider;
 use SiiDte\SiiClient;
 use SiiDte\Storage\CertificateStore;
-use SiiDte\Storage\DteRepository;
+use SiiDte\Storage\InMemoryDteStore;
+use SiiDte\Tests\Support\ScriptedTransport;
+use SiiDte\Tests\Support\SyntheticSii;
 use SiiDte\Utils\HttpResponse;
 use SiiDte\Utils\HttpTransport;
 
@@ -269,15 +271,14 @@ class SiiClientTest extends TestCase
         }
     }
 
-    public function testInyeccionDeFolioManagerFallaExplicitamente(): void
+    private function cliente(?HttpTransport $transport = null): SiiClient
     {
         $this->assertNotNull(self::$tempCertPath);
-        $certStore = CertificateStore::fromFile(self::$tempCertPath, self::$certPassword);
 
-        $client = new SiiClient([
+        return new SiiClient([
             'rut_emisor'        => '76123456',
             'dv_emisor'         => '0',
-            'razon_social'      => 'Empresa Inyeccion SpA',
+            'razon_social'      => 'Empresa de Prueba SpA',
             'giro'              => 'Servicios Informáticos',
             'direccion'         => 'Av. Test 123',
             'ciudad'            => 'Santiago',
@@ -285,85 +286,58 @@ class SiiClientTest extends TestCase
             'numero_resolucion' => 0,
             'fecha_resolucion'  => '2019-10-18',
             'ambiente'          => 'certificacion',
-        ], $certStore);
-
-        $pdo = $this->createMock(\PDO::class);
-        $folioManager = new FolioManager($pdo);
-        $this->expectException(SiiException::class);
-        $this->expectExceptionMessage('FolioManager ya no puede inyectarse');
-        $client->usarFolioManager($folioManager);
+        ], CertificateStore::fromFile(self::$tempCertPath, self::$certPassword), $transport);
     }
 
-    public function testInyeccionDeRepositorioFallaMientrasLaEmisionEstaDeshabilitada(): void
+    public function testEmitirSinFolioProviderFallaSinEfectosExternos(): void
     {
-        $this->assertNotNull(self::$tempCertPath);
-        $client = new SiiClient([
-            'rut_emisor'        => '76123456',
-            'dv_emisor'         => '0',
-            'razon_social'      => 'Empresa Inyeccion SpA',
-            'giro'              => 'Servicios Informáticos',
-            'direccion'         => 'Av. Test 123',
-            'ciudad'            => 'Santiago',
-            'codigo_actividad'  => '620200',
-            'numero_resolucion' => 0,
-            'fecha_resolucion'  => '2019-10-18',
-            'ambiente'          => 'certificacion',
-        ], CertificateStore::fromFile(self::$tempCertPath, self::$certPassword));
-        $repo = new DteRepository($this->createMock(\PDO::class));
-
-        $this->expectException(SiiException::class);
-        $this->expectExceptionMessage('DteRepository no se usa por SiiClient');
-        $client->usarRepositorio($repo);
-    }
-
-    public function testEnvioBloqueadoAntesDeValidarFoliosOCrearEfectosExternos(): void
-    {
-        $this->assertNotNull(self::$tempCertPath);
-        $transport = new class () implements HttpTransport {
+        $transport = new class implements HttpTransport {
             public int $calls = 0;
 
             public function post(string $url, string $body, array $headers, int $timeoutSeconds): HttpResponse
             {
                 ++$this->calls;
 
-                throw new \LogicException('El transporte no debe ser invocado durante el bloqueo.');
+                throw new \LogicException('No debe contactar al SII.');
             }
         };
-        $client = new SiiClient([
-            'rut_emisor'   => '76123456',
-            'dv_emisor'    => '0',
-            'razon_social' => 'Empresa de Prueba SpA',
-            'giro'         => 'Servicios Informáticos',
-            'direccion'    => 'Av. Test 123',
-            'ciudad'       => 'Santiago',
-            'ambiente'     => 'certificacion',
-        ], CertificateStore::fromFile(self::$tempCertPath, self::$certPassword), $transport);
 
         try {
-            $client->enviarDte(33, []);
-            self::fail('La emisión debe permanecer bloqueada.');
+            $this->cliente($transport)->enviarDte(33, []);
+            self::fail('Debía exigir un FolioProvider.');
         } catch (SiiException $exception) {
-            self::assertStringNotContainsString('FRMA', $exception->getMessage());
-            self::assertStringContainsString('XML parcial', $exception->getMessage());
+            self::assertStringContainsString('FolioProvider', $exception->getMessage());
         }
-
         self::assertSame(0, $transport->calls);
+    }
+
+    public function testUsarFoliosYAlmacenPermitenPrepararYEmitirDesdeLaFachada(): void
+    {
+        $synth = SyntheticSii::get();
+        $folios = new InMemoryFolioProvider();
+        $folios->agregarCaf($synth->caf(33, '76123456-0', 1, 5), '76123456-0', 'certificacion', 33);
+        $store = new InMemoryDteStore();
+        $transport = new ScriptedTransport([
+            ScriptedTransport::soap('getSeedReturn', ScriptedTransport::sii('SEMILLA', '000123')),
+            ScriptedTransport::soap('getTokenReturn', ScriptedTransport::sii('TOKEN', 'token-de-prueba')),
+            new HttpResponse(200, '<RECEPCIONDTE><STATUS>0</STATUS><TRACKID>555</TRACKID></RECEPCIONDTE>'),
+        ]);
+
+        $client = $this->cliente($transport)->usarFolios($folios)->usarAlmacen($store);
+        $resultado = $client->enviarDte(33, [
+            'fecha' => date('Y-m-d'),
+            'receptor' => ['rut' => '8414240', 'dv' => '9', 'razon_social' => 'Cliente', 'giro' => 'Comercio', 'direccion' => 'Calle 1', 'comuna' => 'Santiago'],
+            'detalle' => [['nombre' => 'Servicio', 'cantidad' => 1, 'precio' => 1000]],
+        ]);
+
+        self::assertSame('555', $resultado['trackId']);
+        self::assertSame(1, $resultado['folio']);
+        self::assertSame('enviado', $store->registros['76123456-0|certificacion|33|1']['estado']);
     }
 
     public function testPrevisualizacionUsaFolioExplicitoYNoIncluyeFirmaNiSobre(): void
     {
-        $this->assertNotNull(self::$tempCertPath);
-        $client = new SiiClient([
-            'rut_emisor'   => '76123456',
-            'dv_emisor'    => '0',
-            'razon_social' => 'Empresa de Prueba SpA',
-            'giro'         => 'Servicios Informáticos',
-            'direccion'    => 'Av. Test 123',
-            'ciudad'       => 'Santiago',
-            'ambiente'     => 'certificacion',
-        ], CertificateStore::fromFile(self::$tempCertPath, self::$certPassword));
-
-        $preview = $client->previsualizarXml(33, [
+        $preview = $this->cliente()->previsualizarXml(33, [
             'folio' => 7,
             'fecha' => '2026-04-15',
             'receptor' => [
@@ -372,7 +346,7 @@ class SiiClientTest extends TestCase
                 'razon_social' => 'Cliente de Prueba',
                 'giro' => 'Comercio',
                 'direccion' => 'Calle Uno 1',
-                'ciudad' => 'Valparaíso',
+                'comuna' => 'Valparaíso',
             ],
             'detalle' => [['nombre' => 'Artículo', 'cantidad' => 1, 'precio_unitario' => 100]],
         ]);
@@ -385,19 +359,8 @@ class SiiClientTest extends TestCase
 
     public function testPrevisualizacionSinFolioExternoNoReserva(): void
     {
-        $this->assertNotNull(self::$tempCertPath);
-        $client = new SiiClient([
-            'rut_emisor'   => '76123456',
-            'dv_emisor'    => '0',
-            'razon_social' => 'Empresa de Prueba SpA',
-            'giro'         => 'Servicios Informáticos',
-            'direccion'    => 'Av. Test 123',
-            'ciudad'       => 'Santiago',
-            'ambiente'     => 'certificacion',
-        ], CertificateStore::fromFile(self::$tempCertPath, self::$certPassword));
-
         $this->expectException(SiiException::class);
         $this->expectExceptionMessage('no reserva folios');
-        $client->previsualizarXml(33, []);
+        $this->cliente()->previsualizarXml(33, []);
     }
 }

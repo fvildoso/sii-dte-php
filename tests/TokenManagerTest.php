@@ -170,9 +170,7 @@ final class QueueHttpTransport implements HttpTransport
     public array $requests = [];
 
     /** @param list<HttpResponse|\Throwable> $responses */
-    public function __construct(private array $responses)
-    {
-    }
+    public function __construct(private array $responses) {}
 
     public function post(string $url, string $body, array $headers, int $timeoutSeconds): HttpResponse
     {

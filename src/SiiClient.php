@@ -5,18 +5,21 @@ declare(strict_types=1);
 namespace SiiDte;
 
 use SiiDte\Auth\TokenManager;
-use SiiDte\Document\DteBuilder;
+use SiiDte\Document\DteDocumentBuilder;
+use SiiDte\Emission\DteEmitter;
+use SiiDte\Emission\EmisionResultado;
 use SiiDte\Exceptions\SiiException;
-use SiiDte\Folio\FolioManager;
+use SiiDte\Folio\FolioProvider;
 use SiiDte\Pdf\PdfGenerator;
 use SiiDte\Signature\XmlSigner;
 use SiiDte\Storage\CertificateStore;
-use SiiDte\Storage\DteRepository;
+use SiiDte\Storage\DteStore;
 use SiiDte\Utils\HttpTransport;
 use SiiDte\Utils\SiiWebService;
 
 /**
- * Cliente principal para integración con el SII de Chile.
+ * Cliente principal para integración con el SII de Chile: emisión de DTE (facturas, notas, guías,
+ * liquidaciones, exportación y boletas), consulta de estado y utilidades.
  *
  * @phpstan-type SiiConfigShape array{
  *     rut_emisor: string,
@@ -25,59 +28,14 @@ use SiiDte\Utils\SiiWebService;
  *     giro: string,
  *     direccion: string,
  *     ciudad: string,
- *     codigo_actividad?: string|int,
+ *     comuna?: string,
+ *     codigo_actividad?: string|int|list<string|int>,
  *     telefono?: string,
  *     email?: string,
  *     numero_resolucion?: int,
  *     fecha_resolucion?: string,
+ *     rut_envia?: string,
  *     ambiente: 'certificacion'|'produccion'
- * }
- *
- * @phpstan-type ReceptorShape array{
- *     rut: string,
- *     dv: string,
- *     razon_social?: string,
- *     giro?: string,
- *     direccion?: string,
- *     ciudad?: string,
- *     contacto?: string,
- *     correo?: string
- * }
- *
- * @phpstan-type DetalleItemShape array{
- *     codigo?: string,
- *     nombre: string,
- *     descripcion?: string,
- *     cantidad: int|float,
- *     unidad_medida?: string,
- *     precio_unitario: int|float,
- *     descuento_porcentaje?: int|float,
- *     descuento_monto?: int|float,
- *     recargo_porcentaje?: int|float,
- *     recargo_monto?: int|float,
- *     exento?: bool
- * }
- *
- * @phpstan-type DteDataShape array{
- *     fecha: string,
- *     folio?: int,
- *     receptor: ReceptorShape,
- *     detalle: list<DetalleItemShape>|array<int, DetalleItemShape>,
- *     referencias?: list<array<string, mixed>>|array<int, array<string, mixed>>,
- *     descuento_global?: array<string, mixed>,
- *     recargo_global?: array<string, mixed>,
- *     medio_pago?: string,
- *     forma_pago?: string,
- *     observaciones?: string,
- *     ind_traslado?: int,
- *     tipo_despacho?: int
- * }
- *
- * @phpstan-type EnvioResultado array{
- *     trackId: string,
- *     folio: int,
- *     xml: string,
- *     dte_id: int|null
  * }
  */
 class SiiClient
@@ -85,7 +43,7 @@ class SiiClient
     private TokenManager  $tokenManager;
     private XmlSigner     $signer;
     private SiiWebService $webService;
-    private DteBuilder    $builder;
+    private ?DteEmitter   $emitter = null;
     /** @var SiiConfigShape */
     private array         $config;
 
@@ -94,16 +52,17 @@ class SiiClient
      */
     public function __construct(
         array $config,
-        CertificateStore $certStore,
-        ?HttpTransport $transport = null,
-        int $timeoutSeconds = 60,
+        private readonly CertificateStore $certStore,
+        private readonly ?HttpTransport $transport = null,
+        private readonly int $timeoutSeconds = 60,
+        private ?FolioProvider $folios = null,
+        private ?DteStore $store = null,
     ) {
         $this->validateConfig($config);
         $this->config       = $config;
         $this->signer       = new XmlSigner($certStore);
         $this->tokenManager = new TokenManager($this->signer, $config['ambiente'], $transport, $timeoutSeconds);
         $this->webService   = new SiiWebService($config['ambiente'], $transport, $timeoutSeconds);
-        $this->builder      = new DteBuilder($config);
     }
 
     /**
@@ -123,6 +82,8 @@ class SiiClient
         array $overrides = [],
         ?HttpTransport $transport = null,
         int $timeoutSeconds = 60,
+        ?FolioProvider $folios = null,
+        ?DteStore $store = null,
     ): self {
         $getEnv = static function (string $key, mixed $default = null): mixed {
             $val = getenv($key);
@@ -165,72 +126,87 @@ class SiiClient
             'ambiente'          => (string) $getEnv('SII_AMBIENTE', 'certificacion'),
         ], $overrides);
 
-        return new self($config, $certStore, $transport, $timeoutSeconds);
-    }
-
-    /**
-     * @deprecated La asignación automática está deshabilitada; la aplicación reserva el folio.
-     * @throws SiiException Siempre
-     */
-    public function usarFolioManager(FolioManager $fm): static
-    {
-        throw new SiiException(
-            'FolioManager ya no puede inyectarse: reserve el folio en el almacén transaccional de la aplicación.'
-        );
-    }
-
-    /**
-     * @deprecated La emisión está bloqueada y no persiste DTE a través de SiiClient.
-     * @throws SiiException Siempre
-     */
-    public function usarRepositorio(DteRepository $repo): static
-    {
-        throw new SiiException(
-            'DteRepository no se usa por SiiClient mientras la emisión esté deshabilitada; persista el flujo desde la aplicación.'
-        );
+        return new self($config, $certStore, $transport, $timeoutSeconds, $folios, $store);
     }
 
     // Emisión
 
     /**
-     * La emisión permanece deshabilitada hasta completar y verificar el flujo oficial.
-     *
-     * No reserva folios, obtiene tokens ni realiza solicitudes de red.
-     *
-     * @param int $tipoDte Código del tipo de DTE
-     * @param array $datos Datos del documento a emitir
-     * @throws SiiException Siempre, mientras no exista evidencia local y de certificación
+     * Configura la fuente de folios (PdoFolioProvider, InMemoryFolioProvider u otra implementación).
      */
-    public function enviarDte(int $tipoDte, array $datos): array
+    public function usarFolios(FolioProvider $folios): static
     {
-        throw new SiiException(
-            'La emisión integrada está deshabilitada: el constructor factura 33 disponible produce un XML parcial, '
-            . 'no un DTE completo validado para el SII. '
-            . 'Los componentes TED, firma, XSD y transporte probados por separado no constituyen un flujo integrado. '
-            . 'No se reservó ningún folio ni se contactó al SII.'
-        );
+        $this->folios = $folios;
+        $this->emitter = null;
+
+        return $this;
     }
 
     /**
-     * Genera una vista previa XML no firmada y no apta para emisión.
+     * Configura la persistencia opcional del ciclo de vida de cada DTE (se guarda antes de enviar).
+     */
+    public function usarAlmacen(DteStore $store): static
+    {
+        $this->store = $store;
+        $this->emitter = null;
+
+        return $this;
+    }
+
+    /**
+     * Emite un DTE: reserva folio, arma, timbra, firma, valida contra el XSD y envía al SII.
+     *
+     * @param array<string, mixed> $doc Ver DteDocumentBuilder; incluye "tipo" y no incluye "folio"
+     * @throws \SiiDte\Exceptions\FolioAgotadoException Si no quedan folios
+     * @throws \SiiDte\Exceptions\TransportException Si el resultado del envío es incierto
+     */
+    public function emitir(array $doc): EmisionResultado
+    {
+        return $this->emitter()->emitir($doc);
+    }
+
+    /**
+     * Variante de emitir() con tipo y datos separados; devuelve un arreglo.
      *
      * @param int $tipoDte Código del tipo de DTE
-     * @param array $datos Datos del documento
-     * @return string XML de borrador, sin TED, firma, esquema ni validación integral
+     * @param array<string, mixed> $datos Datos del documento (sin tipo ni folio)
+     * @return array{trackId: string|null, folio: int, estado: string, xml: string, sobre: string, ted: string}
+     */
+    public function enviarDte(int $tipoDte, array $datos): array
+    {
+        $r = $this->emitir(['tipo' => $tipoDte] + $datos);
+
+        return ['trackId' => $r->trackId, 'folio' => $r->folio, 'estado' => $r->estado, 'xml' => $r->dteXml, 'sobre' => $r->sobreXml, 'ted' => $r->ted];
+    }
+
+    /**
+     * Genera, timbra, firma y valida un DTE con un folio y CAF propios, sin contactar al SII.
+     *
+     * @param array<string, mixed> $doc
+     */
+    public function preparar(array $doc, int $folio, string $cafXml): EmisionResultado
+    {
+        return $this->emitter()->preparar($doc, $folio, $cafXml);
+    }
+
+    /**
+     * Genera el XML sin timbre ni firma (vista previa). Requiere un folio explícito.
+     *
+     * @param int $tipoDte Código del tipo de DTE
+     * @param array<string, mixed> $datos Datos del documento, con "folio"
+     * @return string XML ISO-8859-1 sin TED ni firma
      */
     public function previsualizarXml(int $tipoDte, array $datos): string
     {
         if (!isset($datos['folio']) || !is_int($datos['folio']) || $datos['folio'] <= 0) {
-            throw new SiiException(
-                'La vista previa requiere un folio explícito suministrado por la aplicación; no reserva folios.'
-            );
+            throw new SiiException('La vista previa requiere un folio explícito; no reserva folios.');
         }
 
-        return $this->builder->build($tipoDte, $datos);
+        return new DteDocumentBuilder($this->config)->build(['tipo' => $tipoDte] + $datos);
     }
 
     /**
-     * @deprecated Use previsualizarXml(); this method no longer returns a signed envelope.
+     * @deprecated Use previsualizarXml().
      */
     public function generarXml(int $tipoDte, array $datos): string
     {
@@ -272,33 +248,13 @@ class SiiClient
      *   DNK = No encontrado aún
      *
      * @param string $trackId ID de seguimiento del envío
-     * @return array Resultado de la consulta al SII
+     * @param bool $boleta true si el envío fue de boletas (39/41): usa la API REST de boletas
+     * @return array<string, mixed> Resultado de la consulta al SII
      */
-    public function consultarEstado(string $trackId): array
+    public function consultarEstado(string $trackId, bool $boleta = false): array
     {
-        $estado = $this->webService->getStatus(
-            $this->config['rut_emisor'],
-            $this->config['dv_emisor'],
-            $trackId,
-            $this->getToken()
-        );
-
         // El estado de envío es de nivel sobre y no acredita el resultado individual de cada DTE.
-        return $estado;
-    }
-
-    /**
-     * El procesamiento automático heredado está deshabilitado.
-     *
-     * La aplicación debe conciliar resultados individuales con su propio repositorio.
-     *
-     * @throws SiiException Siempre
-     */
-    public function procesarPendientes(): array
-    {
-        throw new SiiException(
-            'El procesamiento automático de pendientes está deshabilitado: SiiClient no persiste ni concilia DTE.'
-        );
+        return $this->emitter()->consultarEstado($trackId, $boleta);
     }
 
     /**
@@ -345,6 +301,18 @@ class SiiClient
     public function getToken(): string
     {
         return $this->tokenManager->getToken($this->config['rut_emisor'], $this->config['dv_emisor']);
+    }
+
+    private function emitter(): DteEmitter
+    {
+        return $this->emitter ??= new DteEmitter(
+            $this->config,
+            $this->certStore,
+            $this->folios,
+            $this->store,
+            $this->transport,
+            $this->timeoutSeconds,
+        );
     }
 
     /**

@@ -229,7 +229,7 @@ class CertificateStore
 
     private function __construct(?\Closure $clock = null)
     {
-        $this->clock = $clock ?? static fn (): \DateTimeImmutable => new \DateTimeImmutable();
+        $this->clock = $clock ?? static fn(): \DateTimeImmutable => new \DateTimeImmutable();
     }
 
     /**

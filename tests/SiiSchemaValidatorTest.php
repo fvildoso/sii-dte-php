@@ -77,7 +77,7 @@ class SiiSchemaValidatorTest extends TestCase
 
         foreach ($samples as $profile => $xml) {
             try {
-                (new SiiSchemaValidator())->validate($xml, $profile);
+                new SiiSchemaValidator()->validate($xml, $profile);
                 self::fail(sprintf('El esquema del perfil %s debe rechazar su estructura incompleta.', $profile));
             } catch (SiiException $exception) {
                 $this->assertStringStartsWith(
@@ -94,7 +94,7 @@ class SiiSchemaValidatorTest extends TestCase
         $this->expectException(SiiException::class);
         $this->expectExceptionMessage('La raíz XML no corresponde al perfil XSD seleccionado.');
 
-        (new SiiSchemaValidator())->validate(
+        new SiiSchemaValidator()->validate(
             '<EnvioDTE xmlns="http://www.sii.cl/SiiDte"/>',
             'dte'
         );
@@ -107,7 +107,7 @@ class SiiSchemaValidatorTest extends TestCase
         $sourceDirectory = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'schemas' . DIRECTORY_SEPARATOR . 'sii' . DIRECTORY_SEPARATOR . 'dte';
         $schemaFiles = ['DTE_v10.xsd', 'SiiTypes_v10.xsd', 'xmldsignature_v10.xsd'];
 
-        self::assertTrue(mkdir($profileDirectory, 0777, true));
+        self::assertTrue(mkdir($profileDirectory, 0o777, true));
         foreach ($schemaFiles as $schemaFile) {
             self::assertTrue(copy($sourceDirectory . DIRECTORY_SEPARATOR . $schemaFile, $profileDirectory . DIRECTORY_SEPARATOR . $schemaFile));
         }
@@ -117,7 +117,7 @@ class SiiSchemaValidatorTest extends TestCase
             $this->expectException(SiiException::class);
             $this->expectExceptionMessage('Los esquemas XSD SII no están disponibles o su integridad no pudo verificarse.');
 
-            (new SiiSchemaValidator($testSchemaDirectory))->validate('<DTE xmlns="http://www.sii.cl/SiiDte"/>', 'dte');
+            new SiiSchemaValidator($testSchemaDirectory)->validate('<DTE xmlns="http://www.sii.cl/SiiDte"/>', 'dte');
         } finally {
             foreach ($schemaFiles as $schemaFile) {
                 unlink($profileDirectory . DIRECTORY_SEPARATOR . $schemaFile);
@@ -129,7 +129,7 @@ class SiiSchemaValidatorTest extends TestCase
 
     public function testAceptaMuestraSinteticaDteContraXsd(): void
     {
-        (new SiiSchemaValidator())->validate($this->syntheticInvoice(), 'dte');
+        new SiiSchemaValidator()->validate($this->syntheticInvoice(), 'dte');
         $this->addToAssertionCount(1);
     }
 
@@ -144,7 +144,7 @@ class SiiSchemaValidatorTest extends TestCase
             . '<SubTotDTE><TpoDTE>33</TpoDTE><NroDTE>1</NroDTE></SubTotDTE>'
             . '</Caratula>' . $invoice . '</SetDTE>' . $this->signature('SetDoc') . '</EnvioDTE>';
 
-        (new SiiSchemaValidator())->validate($xml, 'envio_dte');
+        new SiiSchemaValidator()->validate($xml, 'envio_dte');
         $this->addToAssertionCount(1);
     }
 
@@ -166,7 +166,7 @@ class SiiSchemaValidatorTest extends TestCase
             '60803000-K',
         );
         $envelope = str_replace('</EnvioDTE>', $this->signature('SetDoc') . '</EnvioDTE>', $envelope);
-        (new SiiSchemaValidator())->validate($envelope, 'envio_dte');
+        new SiiSchemaValidator()->validate($envelope, 'envio_dte');
 
         $document = new \DOMDocument();
         self::assertTrue($document->loadXML($envelope, LIBXML_NONET));
@@ -223,7 +223,7 @@ class SiiSchemaValidatorTest extends TestCase
             . $this->signature('BOL39F1') . '</DTE></SetDTE>'
             . $this->signature('SetBol') . '</EnvioBOLETA>';
 
-        (new SiiSchemaValidator())->validate($xml, 'envio_boleta');
+        new SiiSchemaValidator()->validate($xml, 'envio_boleta');
         $this->addToAssertionCount(1);
     }
 

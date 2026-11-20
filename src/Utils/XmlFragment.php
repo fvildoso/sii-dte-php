@@ -44,7 +44,7 @@ final class XmlFragment
         }
 
         return array_map(
-            static fn (array $span): string => substr($xml, $span['start'], $span['length']),
+            static fn(array $span): string => substr($xml, $span['start'], $span['length']),
             $spans
         );
     }
@@ -93,7 +93,7 @@ final class XmlFragment
      */
     private static function elementSpans(string $xml, array $path): array
     {
-        if ($path === [] || array_filter($path, static fn (string $name): bool => $name === '') !== []) {
+        if ($path === [] || array_filter($path, static fn(string $name): bool => $name === '') !== []) {
             throw new SiiException('La ruta XML para conservar un fragmento no es válida.');
         }
 

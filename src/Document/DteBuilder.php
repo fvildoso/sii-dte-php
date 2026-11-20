@@ -12,6 +12,9 @@ use SiiDte\Utils\RutHelper;
  *
  * No incorpora TED, validación XSD ni una firma XML verificada.
  */
+/**
+ * @deprecated Usa \SiiDte\Document\DteDocumentBuilder, que cubre todos los tipos de DTE.
+ */
 class DteBuilder
 {
     private array $emisor;

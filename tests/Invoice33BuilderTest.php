@@ -45,7 +45,7 @@ class Invoice33BuilderTest extends TestCase
     {
         $datos = self::datos();
         $datos['detalle'][] = ['nombre' => 'Segundo', 'cantidad' => '0.5', 'precio_unitario' => '200'];
-        $xml = (new Invoice33Builder(self::emisor()))->build(123, $datos);
+        $xml = new Invoice33Builder(self::emisor())->build(123, $datos);
         self::assertStringContainsString('encoding="ISO-8859-1"', $xml);
         self::assertStringContainsString(iconv('UTF-8', 'ISO-8859-1', 'Valparaíso'), $xml);
         $xpath = $this->xpath($xml);
@@ -76,7 +76,7 @@ class Invoice33BuilderTest extends TestCase
             ['nombre' => 'Grande', 'cantidad' => '999999999999', 'precio_unitario' => '100'],
             ['nombre' => 'Fraccionario', 'cantidad' => '0.000001', 'precio_unitario' => '100000000'],
         ];
-        $xpath = $this->xpath((new Invoice33Builder(self::emisor()))->build(9999999999, $datos));
+        $xpath = $this->xpath(new Invoice33Builder(self::emisor())->build(9999999999, $datos));
         self::assertSame('100000000000000', $xpath->evaluate('string(//s:MntNeto)'));
         self::assertSame('19000000000000', $xpath->evaluate('string(//s:IVA)'));
         self::assertSame('119000000000000', $xpath->evaluate('string(//s:MntTotal)'));
@@ -90,7 +90,7 @@ class Invoice33BuilderTest extends TestCase
             ['nombre' => 'Fracciones', 'cantidad' => '1.25', 'precio_unitario' => '2.4'],
             ['nombre' => 'Complemento', 'cantidad' => '1', 'precio_unitario' => '97'],
         ];
-        $xpath = $this->xpath((new Invoice33Builder(self::emisor()))->build(1, $datos));
+        $xpath = $this->xpath(new Invoice33Builder(self::emisor())->build(1, $datos));
         self::assertSame('3', $xpath->evaluate('string(//s:Detalle[1]/s:MontoItem)'));
         self::assertSame('119', $xpath->evaluate('string(//s:MntTotal)'));
 
@@ -98,7 +98,7 @@ class Invoice33BuilderTest extends TestCase
             ['nombre' => 'Grande', 'cantidad' => '840336134453', 'precio_unitario' => '1000000'],
             ['nombre' => 'Complemento', 'cantidad' => '1', 'precio_unitario' => '781500'],
         ];
-        $xpath = $this->xpath((new Invoice33Builder(self::emisor()))->build(1, $datos));
+        $xpath = $this->xpath(new Invoice33Builder(self::emisor())->build(1, $datos));
         self::assertSame('840336134453781500', $xpath->evaluate('string(//s:MntNeto)'));
         self::assertSame('159663865546218485', $xpath->evaluate('string(//s:IVA)'));
         self::assertSame('999999999999999985', $xpath->evaluate('string(//s:MntTotal)'));
@@ -111,7 +111,7 @@ class Invoice33BuilderTest extends TestCase
             ['nombre' => 'Acarreos', 'cantidad' => '123456789.125', 'precio_unitario' => '800'],
             ['nombre' => 'Escala', 'cantidad' => '0.000125', 'precio_unitario' => '800000'],
         ];
-        $xpath = $this->xpath((new Invoice33Builder(self::emisor()))->build(1, $datos));
+        $xpath = $this->xpath(new Invoice33Builder(self::emisor())->build(1, $datos));
         self::assertSame('98765431300', $xpath->evaluate('string(//s:Detalle[1]/s:MontoItem)'));
         self::assertSame('100', $xpath->evaluate('string(//s:Detalle[2]/s:MontoItem)'));
         self::assertSame('98765431400', $xpath->evaluate('string(//s:MntNeto)'));
@@ -121,7 +121,7 @@ class Invoice33BuilderTest extends TestCase
 
     public function testDocumentoIncompletoNoValidaContraXsd(): void
     {
-        $xml = (new Invoice33Builder(self::emisor()))->build(1, self::datos());
+        $xml = new Invoice33Builder(self::emisor())->build(1, self::datos());
         $document = new \DOMDocument();
         self::assertTrue($document->loadXML($xml));
         $previous = libxml_use_internal_errors(true);
@@ -129,7 +129,7 @@ class Invoice33BuilderTest extends TestCase
 
         try {
             self::assertFalse($document->schemaValidate(dirname(__DIR__) . '/schemas/sii/dte/DTE_v10.xsd'));
-            $messages = implode(' ', array_map(static fn (\LibXMLError $error): string => $error->message, libxml_get_errors()));
+            $messages = implode(' ', array_map(static fn(\LibXMLError $error): string => $error->message, libxml_get_errors()));
             self::assertStringContainsString('Signature', $messages);
         } finally {
             libxml_clear_errors();
@@ -142,7 +142,7 @@ class Invoice33BuilderTest extends TestCase
         foreach (['2000-01-01', '2050-12-31'] as $fecha) {
             $datos = self::datos();
             $datos['fecha'] = $fecha;
-            $xpath = $this->xpath((new Invoice33Builder(self::emisor()))->build(1, $datos));
+            $xpath = $this->xpath(new Invoice33Builder(self::emisor())->build(1, $datos));
             self::assertSame($fecha, $xpath->evaluate('string(//s:FchEmis)'));
         }
     }
@@ -151,12 +151,12 @@ class Invoice33BuilderTest extends TestCase
     {
         $datos = self::datos();
         $datos['detalle'] = array_fill(0, 60, ['nombre' => 'Item', 'cantidad' => '1', 'precio_unitario' => '100']);
-        $xpath = $this->xpath((new Invoice33Builder(self::emisor()))->build(1, $datos));
+        $xpath = $this->xpath(new Invoice33Builder(self::emisor())->build(1, $datos));
         self::assertSame(60, $xpath->query('//s:Detalle')->length);
         self::assertSame('60', $xpath->evaluate('string(//s:Detalle[60]/s:NroLinDet)'));
         $datos['detalle'][] = $datos['detalle'][0];
         $this->expectException(SiiException::class);
-        (new Invoice33Builder(self::emisor()))->build(1, $datos);
+        new Invoice33Builder(self::emisor())->build(1, $datos);
     }
 
     public static function entradasInvalidas(): array
@@ -263,6 +263,6 @@ class Invoice33BuilderTest extends TestCase
     public function testRechazaEntradasInvalidas(array $emisor, int $folio, array $datos): void
     {
         $this->expectException(SiiException::class);
-        (new Invoice33Builder($emisor))->build($folio, $datos);
+        new Invoice33Builder($emisor)->build($folio, $datos);
     }
 }

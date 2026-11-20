@@ -13,6 +13,9 @@ use SiiDte\Utils\RutHelper;
  * Solo admite líneas afectas con precio neto, IVA explícito del 19% y cálculos
  * exactos en pesos enteros. No incluye TED, fecha de firma ni firma XML.
  */
+/**
+ * @deprecated Usa \SiiDte\Document\DteDocumentBuilder, que cubre todos los tipos de DTE.
+ */
 class Invoice33Builder
 {
     private array $emisor;

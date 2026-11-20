@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SiiDte\Envelope;
 
+use SiiDte\Document\DteTypes;
 use SiiDte\Exceptions\SiiException;
 use SiiDte\Utils\RutHelper;
 use SiiDte\Utils\XmlFragment;
@@ -46,7 +47,7 @@ class EnvelopeBuilder
             throw new SiiException('El XML firmado debe tener una raíz DTE del SII.');
         }
 
-        $documentNode = self::directChild($dteRoot, 'Documento');
+        $documentNode = self::documentNode($dteRoot);
         $header = $documentNode instanceof \DOMElement ? self::directChild($documentNode, 'Encabezado') : null;
         $idDoc = $header instanceof \DOMElement ? self::directChild($header, 'IdDoc') : null;
         $dteIssuer = $header instanceof \DOMElement ? self::directChild($header, 'Emisor') : null;
@@ -98,7 +99,7 @@ class EnvelopeBuilder
         if ($dteFragment === false) {
             throw new SiiException('No se pudo conservar el nodo DTE firmado.');
         }
-        $caf = XmlFragment::extract($dteFirmadoXml, ['DTE', 'Documento', 'TED', 'DD', 'CAF']);
+        $caf = XmlFragment::extract($dteFirmadoXml, ['DTE', $documentNode->localName, 'TED', 'DD', 'CAF']);
 
         $encoding = $dteDocument->encoding ?: 'UTF-8';
         // DOMDocument::saveXML($node) devuelve UTF-8 incluso cuando el documento declara otra codificación.
@@ -109,7 +110,7 @@ class EnvelopeBuilder
         if ($caf !== null) {
             $encodedFragment = XmlFragment::replace(
                 $encodedFragment,
-                ['DTE', 'Documento', 'TED', 'DD', 'CAF'],
+                ['DTE', $documentNode->localName, 'TED', 'DD', 'CAF'],
                 $caf
             );
         }
@@ -164,6 +165,167 @@ class EnvelopeBuilder
         return $xml;
     }
 
+    /**
+     * Construye un sobre con uno o más DTE firmados del mismo emisor: EnvioDTE (facturas, notas,
+     * guías, exportación, liquidaciones) o EnvioBOLETA (boletas 39/41).
+     *
+     * Las boletas y los demás documentos no pueden mezclarse en un sobre. El destinatario del
+     * sobre es el SII (60803000-K) salvo que se indique otro.
+     *
+     * @param array<mixed> $dtesFirmados Lista con el XML de cada DTE ya timbrado y firmado
+     * @param array<string, mixed> $emisor rut_emisor, dv_emisor, fecha_resolucion, numero_resolucion
+     * @param string|null $rutEnvia RUT de quien transmite (por defecto, el emisor)
+     * @throws SiiException Si los DTE no son consistentes con el emisor o el tipo de sobre
+     */
+    public static function buildSet(
+        array $dtesFirmados,
+        array $emisor,
+        ?string $rutEnvia = null,
+        ?\DateTimeImmutable $timestamp = null,
+        string $rutReceptorSobre = '60803000-K',
+    ): string {
+        if ($dtesFirmados === [] || !array_is_list($dtesFirmados)) {
+            throw new SiiException('Debe indicar al menos un DTE firmado.');
+        }
+        $configuredIssuer = self::configuredRut($emisor, 'rut_emisor', 'dv_emisor');
+        $senderRut = $rutEnvia ?? $configuredIssuer;
+        if (!RutHelper::validate($senderRut) || !RutHelper::validate($rutReceptorSobre)) {
+            throw new SiiException('El RUT del remitente o del destinatario del sobre no es válido.');
+        }
+
+        $resolutionDate = $emisor['fecha_resolucion'] ?? null;
+        $resolutionNumber = $emisor['numero_resolucion'] ?? null;
+        $parsedResolutionDate = is_string($resolutionDate)
+            ? \DateTimeImmutable::createFromFormat('!Y-m-d', $resolutionDate)
+            : false;
+        if (!is_string($resolutionDate)
+            || $parsedResolutionDate === false
+            || $parsedResolutionDate->format('Y-m-d') !== $resolutionDate
+            || (!is_int($resolutionNumber) && !(is_string($resolutionNumber) && preg_match('/^\d+$/D', $resolutionNumber) === 1))
+            || (int) $resolutionNumber > 999999
+        ) {
+            throw new SiiException('La fecha o el número de resolución del emisor no son válidos.');
+        }
+
+        $fragments = '';
+        $counts = [];
+        $boletas = null;
+        foreach ($dtesFirmados as $dteXml) {
+            if (!is_string($dteXml)) {
+                throw new SiiException('Cada DTE firmado debe ser una cadena XML.');
+            }
+            [$type, $issuer, $fragment] = self::dteFragment($dteXml);
+            if (self::normalizeRut($issuer) !== self::normalizeRut($configuredIssuer)) {
+                throw new SiiException('El emisor de un DTE no coincide con el emisor del sobre.');
+            }
+            $isBoleta = $type === '39' || $type === '41';
+            if ($boletas !== null && $boletas !== $isBoleta) {
+                throw new SiiException('Las boletas (39/41) no pueden enviarse en el mismo sobre que otros DTE.');
+            }
+            $boletas = $isBoleta;
+            $counts[$type] = ($counts[$type] ?? 0) + 1;
+            $fragments .= $fragment;
+        }
+        if ($boletas === true && (count($dtesFirmados) > 500 || count($counts) > 2)) {
+            throw new SiiException('Un sobre de boletas admite hasta 500 boletas y 2 tipos.');
+        }
+        if ($boletas === false && count($dtesFirmados) > 2000) {
+            throw new SiiException('Un sobre EnvioDTE admite hasta 2000 documentos.');
+        }
+
+        $rootName = $boletas === true ? 'EnvioBOLETA' : 'EnvioDTE';
+        $timestamp ??= new \DateTimeImmutable('now', new \DateTimeZone('America/Santiago'));
+
+        $document = new \DOMDocument('1.0', 'ISO-8859-1');
+        $document->formatOutput = false;
+        $root = $document->createElementNS(self::SII_NAMESPACE, $rootName);
+        $root->setAttribute('version', '1.0');
+        $document->appendChild($root);
+        $set = $document->createElementNS(self::SII_NAMESPACE, 'SetDTE');
+        $set->setAttribute('ID', $boletas === true ? 'SetBoleta' : 'SetDoc');
+        $root->appendChild($set);
+        $cover = $document->createElementNS(self::SII_NAMESPACE, 'Caratula');
+        $cover->setAttribute('version', '1.0');
+        $set->appendChild($cover);
+        foreach ([
+            'RutEmisor' => self::normalizeRut($configuredIssuer),
+            'RutEnvia' => self::normalizeRut($senderRut),
+            'RutReceptor' => self::normalizeRut($rutReceptorSobre),
+            'FchResol' => $resolutionDate,
+            'NroResol' => (string) $resolutionNumber,
+            'TmstFirmaEnv' => $timestamp->format('Y-m-d\\TH:i:s'),
+        ] as $name => $value) {
+            $cover->appendChild($document->createElementNS(self::SII_NAMESPACE, $name))
+                ->appendChild($document->createTextNode($value));
+        }
+        ksort($counts, SORT_NUMERIC);
+        foreach ($counts as $type => $count) {
+            $subtotal = $document->createElementNS(self::SII_NAMESPACE, 'SubTotDTE');
+            $cover->appendChild($subtotal);
+            $subtotal->appendChild($document->createElementNS(self::SII_NAMESPACE, 'TpoDTE'))
+                ->appendChild($document->createTextNode((string) $type));
+            $subtotal->appendChild($document->createElementNS(self::SII_NAMESPACE, 'NroDTE'))
+                ->appendChild($document->createTextNode((string) $count));
+        }
+
+        $xml = $document->saveXML();
+        $setEnd = is_string($xml) ? strrpos($xml, '</SetDTE>') : false;
+        if (!is_string($xml) || $setEnd === false) {
+            throw new SiiException('No se pudo serializar el sobre.');
+        }
+
+        return substr_replace($xml, $fragments, $setEnd, 0);
+    }
+
+    /**
+     * @return array{0: string, 1: string, 2: string} tipo, RUT emisor y fragmento DTE en su codificación original
+     */
+    private static function dteFragment(string $dteXml): array
+    {
+        $document = self::loadSafeXml($dteXml);
+        $root = $document->documentElement;
+        if (!$root instanceof \DOMElement || $root->localName !== 'DTE' || $root->namespaceURI !== self::SII_NAMESPACE) {
+            throw new SiiException('El XML firmado debe tener una raíz DTE del SII.');
+        }
+        $documentNode = self::documentNode($root);
+        $header = $documentNode instanceof \DOMElement ? self::directChild($documentNode, 'Encabezado') : null;
+        $idDoc = $header instanceof \DOMElement ? self::directChild($header, 'IdDoc') : null;
+        $issuerNode = $header instanceof \DOMElement ? self::directChild($header, 'Emisor') : null;
+        $type = $idDoc instanceof \DOMElement ? self::directChildText($idDoc, 'TipoDTE') : null;
+        $issuer = $issuerNode instanceof \DOMElement ? self::directChildText($issuerNode, 'RUTEmisor') : null;
+        if ($type === null || preg_match('/^\d+$/D', $type) !== 1 || $issuer === null || !RutHelper::validate($issuer)) {
+            throw new SiiException('El DTE firmado no contiene los datos mínimos de emisor y tipo.');
+        }
+        $signed = false;
+        foreach ($root->childNodes as $child) {
+            if ($child instanceof \DOMElement && $child->localName === 'Signature'
+                && $child->namespaceURI === 'http://www.w3.org/2000/09/xmldsig#'
+            ) {
+                $signed = true;
+            }
+        }
+        if (!$signed) {
+            throw new SiiException('El DTE debe estar firmado antes de armar el sobre.');
+        }
+
+        $fragment = $document->saveXML($root);
+        if ($fragment === false) {
+            throw new SiiException('No se pudo conservar el nodo DTE firmado.');
+        }
+        $encoding = $document->encoding ?: 'UTF-8';
+        $encoded = @iconv('UTF-8', $encoding, $fragment);
+        if ($encoded === false) {
+            throw new SiiException('No se pudo conservar la codificación del DTE firmado en el sobre.');
+        }
+        $cafPath = ['DTE', $documentNode->localName, 'TED', 'DD', 'CAF'];
+        $caf = XmlFragment::extract($dteXml, $cafPath);
+        if ($caf !== null) {
+            $encoded = XmlFragment::replace($encoded, $cafPath, $caf);
+        }
+
+        return [$type, $issuer, $encoded];
+    }
+
     private static function loadSafeXml(string $xml): \DOMDocument
     {
         if ($xml === '' || strlen($xml) > self::MAX_XML_SIZE) {
@@ -197,6 +359,18 @@ class EnvelopeBuilder
                 && $child->namespaceURI === self::SII_NAMESPACE
             ) {
                 return $child;
+            }
+        }
+
+        return null;
+    }
+
+    private static function documentNode(\DOMElement $root): ?\DOMElement
+    {
+        foreach (DteTypes::NODOS_DOCUMENTO as $name) {
+            $node = self::directChild($root, $name);
+            if ($node instanceof \DOMElement) {
+                return $node;
             }
         }
 
