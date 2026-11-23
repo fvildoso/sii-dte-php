@@ -134,7 +134,7 @@ final class BoletaApi
             ];
         }
         if ($response->statusCode >= 400 && $response->statusCode < 500) {
-            throw new SiiException('El SII rechazó el envío de boletas (HTTP ' . $response->statusCode . ')' . $this->detail($json) . '.');
+            throw new SiiException('El SII rechazó el envío de boletas (HTTP ' . $response->statusCode . ')' . $this->detail($json, $response->body) . '.');
         }
 
         throw new TransportException(
@@ -269,16 +269,29 @@ final class BoletaApi
         return ' (estado ' . ($estado === null ? '?' : $clean($estado)) . ($glosa === null || $glosa === '' ? '' : ': ' . $clean($glosa)) . ')';
     }
 
-    private function detail(mixed $json): string
+    /**
+     * Motivo informado por el SII: el campo de mensaje conocido, o si no viene, el JSON o el texto
+     * de la respuesta resumido (sin caracteres de control), para no ocultar la causa del rechazo.
+     */
+    private function detail(mixed $json, string $body = ''): string
     {
+        $clean = static fn(string $text, int $max): string => mb_substr(
+            trim(preg_replace('/\s+/u', ' ', preg_replace('/[^\P{C}\t]+/u', ' ', $text) ?? '') ?? ''),
+            0,
+            $max
+        );
         if (is_array($json)) {
             foreach (['mensaje', 'message', 'error'] as $key) {
                 if (isset($json[$key]) && is_string($json[$key])) {
-                    return ': ' . mb_substr(preg_replace('/[^\P{C}\t]+/u', '', $json[$key]) ?? '', 0, 200);
+                    return ': ' . $clean($json[$key], 200);
                 }
             }
-        }
+            $encoded = json_encode($json, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        return '';
+            return is_string($encoded) && $encoded !== '[]' ? ': ' . $clean($encoded, 300) : '';
+        }
+        $text = $clean(strip_tags($body), 300);
+
+        return $text === '' ? '' : ': ' . $text;
     }
 }

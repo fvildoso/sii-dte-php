@@ -24,6 +24,7 @@ class SiiWebServiceTest extends TestCase
         self::assertSame('https://maullin.sii.cl/cgi_dte/UPL/DTEUpload', $transport->requests[0]['url']);
         self::assertSame(24, $transport->requests[0]['timeout']);
         self::assertContains('Cookie: TOKEN=token-test', $transport->requests[0]['headers']);
+        self::assertContains('User-Agent: Mozilla/4.0 ( compatible; PROG 1.0; Windows NT)', $transport->requests[0]['headers']);
         self::assertStringContainsString("name=\"rutSender\"\r\n\r\n60803000\r\n", $transport->requests[0]['body']);
         self::assertStringContainsString("name=\"dvSender\"\r\n\r\nK\r\n", $transport->requests[0]['body']);
         self::assertStringContainsString("name=\"rutCompany\"\r\n\r\n97975000\r\n", $transport->requests[0]['body']);
@@ -158,6 +159,40 @@ class SiiWebServiceTest extends TestCase
                 self::assertTrue($exception->outcomeMayBeUnknown);
             }
             self::assertCount(1, $transport->requests);
+        }
+    }
+
+    public function testStatusDeRechazoInformaCodigoDescripcionYDetalleDelSii(): void
+    {
+        $casos = [
+            '<RECEPCIONDTE><STATUS>1</STATUS></RECEPCIONDTE>' => 'STATUS 1: el remitente (RutEnvia) no tiene permiso',
+            '<RECEPCIONDTE><STATUS>99</STATUS><DETAIL><ERROR>Falla de proceso</ERROR></DETAIL></RECEPCIONDTE>'
+                => 'STATUS 99: error interno del SII). Detalle: Falla de proceso',
+        ];
+        foreach ($casos as $xml => $esperado) {
+            $transport = new SiiWebServiceTestTransport([new HttpResponse(200, $xml)]);
+            try {
+                new SiiWebService('certificacion', $transport)->uploadDte('97975000', '5', '<EnvioDTE/>', 'token-test');
+                self::fail('Se esperaba un rechazo.');
+            } catch (\SiiDte\Exceptions\SiiException $exception) {
+                self::assertNotInstanceOf(TransportException::class, $exception);
+                self::assertStringContainsString($esperado, $exception->getMessage());
+            }
+        }
+    }
+
+    public function testRespuestaNoXmlIncluyeExtractoLimpioParaDiagnostico(): void
+    {
+        $transport = new SiiWebServiceTestTransport([
+            new HttpResponse(200, "<html><body><h1>Error</h1>\x07Sesion expirada</body></html>"),
+        ]);
+        try {
+            new SiiWebService('certificacion', $transport)->uploadDte('97975000', '5', '<EnvioDTE/>', 'token-test');
+            self::fail('Se esperaba un resultado incierto.');
+        } catch (TransportException $exception) {
+            self::assertTrue($exception->outcomeMayBeUnknown);
+            self::assertStringContainsString('Respuesta: Error Sesion expirada', $exception->getMessage());
+            self::assertStringNotContainsString("\x07", $exception->getMessage());
         }
     }
 

@@ -47,6 +47,24 @@ final class BoletaApiTest extends TestCase
         }
     }
 
+    public function testRechazo4xxSinCampoMensajeMuestraLaRespuestaDelSii(): void
+    {
+        foreach ([
+            '{"codigo":"BOL-001","descripcion":"Caratula invalida"}' => '"descripcion":"Caratula invalida"',
+            '<html><body>Bad Request: archivo invalido</body></html>' => 'Bad Request: archivo invalido',
+        ] as $body => $esperado) {
+            [$api] = $this->api([new HttpResponse(400, $body)]);
+            try {
+                $api->enviar('<EnvioBOLETA/>', '97975000-5');
+                self::fail();
+            } catch (SiiException $e) {
+                self::assertNotInstanceOf(TransportException::class, $e);
+                self::assertStringContainsString('HTTP 400', $e->getMessage());
+                self::assertStringContainsString($esperado, $e->getMessage());
+            }
+        }
+    }
+
     public function testRespuestaIlegibleEnElEnvioEsResultadoIncierto(): void
     {
         foreach ([new HttpResponse(200, 'no es json'), new HttpResponse(502, '<html>bad gateway</html>')] as $respuesta) {

@@ -21,6 +21,18 @@ class SiiWebService
         'produccion'    => 'https://palena.sii.cl/cgi_dte/UPL/DTEUpload',
     ];
 
+    /** Códigos STATUS de la respuesta de DTEUpload (manual de upload del SII); cualquier otro es error interno. */
+    private const UPLOAD_STATUS = [
+        1 => 'el remitente (RutEnvia) no tiene permiso para enviar documentos de la empresa',
+        2 => 'error en el tamaño del archivo',
+        3 => 'archivo cortado',
+        5 => 'no está autenticado (token inválido o vencido)',
+        6 => 'la empresa no está autorizada para enviar archivos',
+        7 => 'esquema inválido',
+        8 => 'error en la firma del documento',
+        9 => 'sistema bloqueado',
+    ];
+
     // URLs consulta estado
     private const STATUS_URLS = [
         'certificacion' => 'https://maullin.sii.cl/DTEWS/QueryEstUp.jws',
@@ -112,7 +124,8 @@ class SiiWebService
             $this->assertNoSoapFault($document);
         } catch (SiiException $exception) {
             throw new TransportException(
-                'La respuesta de recepción no se pudo interpretar; el resultado remoto puede ser desconocido. No reintente automáticamente.',
+                'La respuesta de recepción no se pudo interpretar; el resultado remoto puede ser desconocido. No reintente automáticamente.'
+                . self::responseExcerpt($response),
                 true,
                 0,
                 $exception,
@@ -126,14 +139,44 @@ class SiiWebService
             return $trackId;
         }
 
-        if ($status !== null && preg_match('/^[1-9]$/D', $status) === 1 && $trackId === null) {
-            throw new SiiException('El SII no confirmó la recepción del envío. Código de respuesta: ' . substr($status, 0, 32));
+        // Un STATUS distinto de 0 sin track ID significa que el SII no aceptó el sobre (incluido 99, error
+        // interno). Con track ID la respuesta es contradictoria y se trata como incierta más abajo.
+        if ($status !== null && preg_match('/^\d{1,3}$/D', $status) === 1 && $status !== '0' && $trackId === null) {
+            $errors = [];
+            foreach ($document->getElementsByTagName('*') as $element) {
+                if ($element->localName === 'ERROR' && trim($element->textContent) !== '') {
+                    $errors[] = self::clean($element->textContent, 200);
+                }
+            }
+            throw new SiiException(
+                'El SII rechazó el envío (STATUS ' . $status . ': ' . (self::UPLOAD_STATUS[(int) $status] ?? 'error interno del SII') . ')'
+                . ($errors === [] ? '' : '. Detalle: ' . implode(' | ', array_slice($errors, 0, 5)))
+                . '.'
+            );
         }
 
         throw new TransportException(
-            'No se pudo interpretar la respuesta de recepción; el resultado remoto puede ser desconocido. No reintente automáticamente.',
+            'No se pudo interpretar la respuesta de recepción; el resultado remoto puede ser desconocido. No reintente automáticamente.'
+            . self::responseExcerpt($response),
             true,
         );
+    }
+
+    /**
+     * Extracto legible de una respuesta inesperada (sin etiquetas ni caracteres de control), para diagnosticar.
+     */
+    private static function responseExcerpt(string $body): string
+    {
+        $text = self::clean(strip_tags($body), 300);
+
+        return $text === '' ? ' Respuesta vacía.' : ' Respuesta: ' . $text;
+    }
+
+    private static function clean(string $text, int $max): string
+    {
+        $text = preg_replace('/[^\P{C}\t]+/u', ' ', $text) ?? '';
+
+        return mb_substr(trim(preg_replace('/\s+/u', ' ', $text) ?? ''), 0, $max);
     }
 
     /**
@@ -316,12 +359,15 @@ class SiiWebService
      */
     private function httpPost(string $url, string $body, array $headers, bool $effectful = false): string
     {
+        // El manual de upload del SII usa este User-Agent; sin él DTEUpload puede responder una página HTML.
+        $headers[] = 'User-Agent: Mozilla/4.0 ( compatible; PROG 1.0; Windows NT)';
         $response = $this->transport->post($url, $body, $headers, $this->timeoutSeconds);
         if ($response->statusCode < 200 || $response->statusCode >= 300) {
             if ($effectful) {
                 throw new TransportException(
                     'El servicio SII respondió HTTP ' . $response->statusCode
-                    . '; el resultado del envío puede ser desconocido. No reintente automáticamente.',
+                    . '; el resultado del envío puede ser desconocido. No reintente automáticamente.'
+                    . self::responseExcerpt($response->body),
                     true,
                 );
             }
