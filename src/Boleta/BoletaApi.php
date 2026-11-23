@@ -67,7 +67,7 @@ final class BoletaApi
         $seedDocument = $this->loadXml($seedResponse->body);
         $seed = $this->findText($seedDocument, 'SEMILLA');
         if ($seed === null || preg_match('/^\d+$/D', $seed) !== 1) {
-            throw new SiiException('La respuesta del SII no contiene una semilla numérica válida.');
+            throw new SiiException('La respuesta del SII no contiene una semilla numérica válida' . $this->siiStatus($seedDocument) . '.');
         }
 
         $tokenResponse = $this->send('POST', $base . '/boleta.electronica.token', [
@@ -75,9 +75,14 @@ final class BoletaApi
             'Accept: application/xml',
         ], $this->signer->signTokenRequest($seed));
         $this->assertOk($tokenResponse, 'obtener el token');
-        $token = $this->findText($this->loadXml($tokenResponse->body), 'TOKEN');
-        if ($token === null || preg_match('/^[A-Za-z0-9._\-]{4,256}$/D', $token) !== 1) {
-            throw new SiiException('La respuesta del SII no contiene un token válido.');
+        $tokenDocument = $this->loadXml($tokenResponse->body);
+        $token = $this->findText($tokenDocument, 'TOKEN');
+        if ($token === null || $token === '') {
+            // Sin token el SII informa el motivo en ESTADO/GLOSA (certificado no reconocido, firma inválida, etc.).
+            throw new SiiException('El SII no entregó el token de boletas' . $this->siiStatus($tokenDocument) . '.');
+        }
+        if (preg_match('/^[A-Za-z0-9._\-]{4,256}$/D', $token) !== 1) {
+            throw new SiiException('El SII entregó un token de boletas con formato inesperado (' . strlen($token) . ' caracteres)' . $this->siiStatus($tokenDocument) . '.');
         }
 
         $this->cachedToken = $token;
@@ -247,6 +252,21 @@ final class BoletaApi
         } catch (\JsonException) {
             return null;
         }
+    }
+
+    /**
+     * " (estado X: glosa)" a partir de la cabecera RESP_HDR del SII, o cadena vacía si no viene.
+     */
+    private function siiStatus(\DOMDocument $document): string
+    {
+        $clean = static fn(?string $text): string => mb_substr(preg_replace('/[^\P{C}\t]+/u', '', (string) $text) ?? '', 0, 200);
+        $estado = $this->findText($document, 'ESTADO');
+        $glosa = $this->findText($document, 'GLOSA');
+        if ($estado === null && $glosa === null) {
+            return '';
+        }
+
+        return ' (estado ' . ($estado === null ? '?' : $clean($estado)) . ($glosa === null || $glosa === '' ? '' : ': ' . $clean($glosa)) . ')';
     }
 
     private function detail(mixed $json): string
