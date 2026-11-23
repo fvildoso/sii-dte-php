@@ -91,6 +91,23 @@ final class DteDocumentBuilderTest extends TestCase
                     'detalle' => [['nombre' => 'Anulación', 'cantidad' => 1, 'precio' => 5000]]],
                 ['neto' => '5000', 'iva' => '950', 'exento' => '0', 'total' => '5950'],
             ],
+            '61 nota de crédito que corrige texto (sin montos)' => [
+                $base + ['tipo' => 61, 'receptor' => self::RECEPTOR,
+                    'referencias' => [['codigo' => 2, 'razon' => 'Corrige giro del receptor'] + $ref],
+                    'detalle' => [['nombre' => 'Corrige giro del receptor']]],
+                ['neto' => '0', 'iva' => '0', 'exento' => '0', 'total' => '0'],
+            ],
+            '56 nota de débito que anula una nota de corrección' => [
+                $base + ['tipo' => 56, 'receptor' => self::RECEPTOR,
+                    'referencias' => [['tipo_doc' => '61', 'codigo' => 1, 'razon' => 'Anula nota de crédito'] + $ref],
+                    'detalle' => [['nombre' => 'Corrige giro del receptor']]],
+                ['neto' => '0', 'iva' => '0', 'exento' => '0', 'total' => '0'],
+            ],
+            '39 boleta del set de pruebas con CodRef SET' => [
+                $base + ['tipo' => 39, 'referencias' => [['codigo' => 'SET', 'razon' => 'CASO-5']],
+                    'detalle' => [['nombre' => 'Arroz', 'cantidad' => 5, 'precio' => 700, 'unidad' => 'Kg']]],
+                ['neto' => '2941', 'iva' => '559', 'exento' => '0', 'total' => '3500'],
+            ],
             '110 factura de exportación' => [
                 $base + ['tipo' => 110, 'receptor' => ['rut' => '55555555-5', 'razon_social' => 'Foreign Buyer Inc', 'direccion' => 'Main St 1', 'comuna' => 'Miami'],
                     'exportacion' => ['moneda' => 'DOLAR USA', 'decimales' => 2,
@@ -135,6 +152,32 @@ final class DteDocumentBuilderTest extends TestCase
         $verificacion = new TedBuilder(new CafInspector())->verify($resultado['dte']);
         self::assertTrue($verificacion['frmt_verificada']);
         self::assertTrue($verificacion['datos_coinciden']);
+    }
+
+    public function testLineaSinPrecioDeNotaNoEmitePrcItemNiCantidad(): void
+    {
+        $xml = $this->builder()->build([
+            'tipo' => 61, 'folio' => 1, 'fecha' => '2026-11-20', 'receptor' => self::RECEPTOR,
+            'referencias' => [['tipo_doc' => '33', 'folio' => '5', 'fecha' => '2026-11-10', 'codigo' => 2, 'razon' => 'Corrige giro']],
+            'detalle' => [['nombre' => 'Corrige giro']],
+        ]);
+        self::assertStringNotContainsString('<PrcItem>', $xml);
+        self::assertStringNotContainsString('<QtyItem>', $xml);
+        self::assertStringContainsString('<MontoItem>0</MontoItem>', $xml);
+        self::assertStringContainsString('<MntTotal>0</MntTotal>', $xml);
+    }
+
+    public function testBoletaAceptaCodRefTextoPeroValidaLargo(): void
+    {
+        $doc = ['tipo' => 39, 'folio' => 1, 'fecha' => '2026-11-20',
+            'referencias' => [['codigo' => 'SET', 'razon' => 'CASO-1']],
+            'detalle' => [['nombre' => 'Café', 'cantidad' => 1, 'precio' => 1000]]];
+        self::assertStringContainsString('<CodRef>SET</CodRef>', $this->builder()->build($doc));
+
+        $doc['referencias'][0]['codigo'] = str_repeat('X', 19);
+        $this->expectException(SiiException::class);
+        $this->expectExceptionMessageMatches('/referencias.codigo/');
+        $this->builder()->build($doc);
     }
 
     public function testRedondeaHalfUpYNoUsaFloat(): void
@@ -193,6 +236,8 @@ final class DteDocumentBuilderTest extends TestCase
             'nombre demasiado largo' => [['detalle' => [['nombre' => str_repeat('a', 81), 'cantidad' => 1, 'precio' => 1]]] + $ok, '/80 caracteres/'],
             'exportación sin moneda' => [['tipo' => 110] + $ok, '/exportacion/'],
             'precio ausente fuera de guía' => [['detalle' => [['nombre' => 'X', 'cantidad' => 1]]] + $ok, '/precio/'],
+            'precio ausente en boleta' => [['tipo' => 39, 'detalle' => [['nombre' => 'X', 'cantidad' => 1]]] + $ok, '/precio/'],
+            'CodRef texto fuera de boleta' => [['tipo' => 61, 'referencias' => [['tipo_doc' => '33', 'folio' => '1', 'fecha' => '2026-11-10', 'codigo' => 'SET']]] + $ok, '/referencias.codigo/'],
             'impuesto no declarado' => [['detalle' => [['nombre' => 'X', 'cantidad' => 1, 'precio' => 1, 'impuesto' => 27]]] + $ok, '/impuestos/'],
         ];
     }

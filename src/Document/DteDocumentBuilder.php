@@ -238,7 +238,9 @@ final class DteDocumentBuilder
         }
 
         if ($precio === null) {
-            if ($tipo !== 52) {
+            // Guías sin valorizar y notas que solo corrigen texto (CodRef 2) llevan líneas con MontoItem 0
+            // y sin PrcItem: el XSD exige PrcItem > 0, así que no puede enviarse un precio cero.
+            if (!in_array($tipo, [52, 56, 61], true)) {
                 throw new SiiException("{$ctx}.precio es obligatorio.");
             }
             $bruto = '0';
@@ -1073,7 +1075,10 @@ final class DteDocumentBuilder
                     $node['FolioRef'] = $this->text($r['folio'], 18, 'referencias.folio');
                 }
                 if (isset($r['codigo'])) {
-                    $node['CodRef'] = $this->intIn($r['codigo'], [1, 2, 3], 'referencias.codigo');
+                    // En boletas CodRef es texto libre (hasta 18): el set de pruebas del SII exige "SET".
+                    $node['CodRef'] = is_int($r['codigo'])
+                        ? $this->intIn($r['codigo'], [1, 2, 3], 'referencias.codigo')
+                        : $this->text($r['codigo'], 18, 'referencias.codigo');
                 }
                 if (isset($r['razon'])) {
                     $node['RazonRef'] = $this->text($r['razon'], 90, 'referencias.razon');
