@@ -147,7 +147,7 @@ final class DteDocumentBuilderTest extends TestCase
         $xml = $this->builder()->build($doc);
         $resultado = SyntheticSii::get()->emitir($xml, $doc['tipo'], $doc['folio']);
         self::assertStringContainsString('<TED version="1.0">', $resultado['dte']);
-        self::assertStringContainsString('<ds:Signature', $resultado['sobre']);
+        self::assertStringContainsString('<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">', $resultado['sobre']);
 
         $verificacion = new TedBuilder(new CafInspector())->verify($resultado['dte']);
         self::assertTrue($verificacion['frmt_verificada']);

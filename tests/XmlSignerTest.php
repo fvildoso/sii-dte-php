@@ -133,6 +133,23 @@ class XmlSignerTest extends TestCase
         $this->assertIndependentVerificationFails($this->loadXml($changedSignedInfo));
     }
 
+    /**
+     * El SII responde "estado 10: Error Interno" si la firma usa el prefijo "ds:"; solo acepta la firma
+     * en el espacio de nombres por defecto (verificado contra apicert.sii.cl y maullin.sii.cl).
+     */
+    public function testFirmasUsanSignatureSinPrefijoComoExigeElSii(): void
+    {
+        $sinPrefijo = '<Signature xmlns="' . self::DSIG_NAMESPACE . '">';
+        $token = self::$signer->signTokenRequest('000002248802');
+        self::assertStringContainsString($sinPrefijo, $token);
+        self::assertStringNotContainsString('ds:', $token);
+
+        $documento = $this->loadXml($token);
+        foreach ($documento->getElementsByTagNameNS(self::DSIG_NAMESPACE, '*') as $nodo) {
+            self::assertSame('', $nodo->prefix, "El nodo {$nodo->localName} no debe llevar prefijo.");
+        }
+    }
+
     public function testFirmaSolicitudTokenRechazaSemillaNoNumerica(): void
     {
         $this->expectException(SiiException::class);

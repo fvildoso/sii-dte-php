@@ -161,7 +161,7 @@ class XmlSigner
         $seedNode->appendChild($doc->createTextNode($seed));
         $item->appendChild($seedNode);
 
-        $signatureNode = $doc->createElementNS(self::DSIG_NAMESPACE, 'ds:Signature');
+        $signatureNode = $doc->createElementNS(self::DSIG_NAMESPACE, 'Signature');
         $root->appendChild($signatureNode);
         $signedInfo = $this->createDsigElement($doc, $signatureNode, 'SignedInfo');
         $this->appendDsigElement($doc, $signedInfo, 'CanonicalizationMethod')
@@ -245,7 +245,7 @@ class XmlSigner
             throw new SiiException('No se pudo canonicalizar el elemento que se debe firmar.');
         }
 
-        $signatureNode = $doc->createElementNS(self::DSIG_NAMESPACE, 'ds:Signature');
+        $signatureNode = $doc->createElementNS(self::DSIG_NAMESPACE, 'Signature');
         $signatureParent->appendChild($signatureNode);
         $signedInfo = $this->createDsigElement($doc, $signatureNode, 'SignedInfo');
         $this->appendDsigElement($doc, $signedInfo, 'CanonicalizationMethod')
@@ -412,9 +412,14 @@ class XmlSigner
         return $targetId;
     }
 
+    /**
+     * Los nodos XMLDSig van en el espacio de nombres por defecto (<Signature xmlns="...xmldsig#">), sin prefijo:
+     * los servicios del SII responden "Error Interno" (estado 10) a una solicitud de token firmada con
+     * prefijo "ds:", aunque para XMLDSig ambas formas sean equivalentes. Así lo muestran sus ejemplos oficiales.
+     */
     private function createDsigElement(\DOMDocument $doc, \DOMElement $parent, string $name): \DOMElement
     {
-        $element = $doc->createElementNS(self::DSIG_NAMESPACE, 'ds:' . $name);
+        $element = $doc->createElementNS(self::DSIG_NAMESPACE, $name);
         $parent->appendChild($element);
 
         return $element;
