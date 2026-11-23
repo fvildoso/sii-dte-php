@@ -17,6 +17,7 @@ use SiiDte\Utils\XmlFragment;
 class EnvelopeBuilder
 {
     private const SII_NAMESPACE = 'http://www.sii.cl/SiiDte';
+    private const XSI_NAMESPACE = 'http://www.w3.org/2001/XMLSchema-instance';
     private const MAX_XML_SIZE = 5 * 1024 * 1024;
     /**
      * Construye el XML del sobre EnvioDTE.
@@ -119,6 +120,7 @@ class EnvelopeBuilder
         $envelopeDocument->preserveWhiteSpace = true;
         $envelopeDocument->formatOutput = false;
         $root = $envelopeDocument->createElementNS(self::SII_NAMESPACE, 'EnvioDTE');
+        self::declareSchema($root, 'EnvioDTE_v10.xsd');
         $root->setAttribute('version', '1.0');
         $envelopeDocument->appendChild($root);
 
@@ -239,6 +241,7 @@ class EnvelopeBuilder
         $document = new \DOMDocument('1.0', 'ISO-8859-1');
         $document->formatOutput = false;
         $root = $document->createElementNS(self::SII_NAMESPACE, $rootName);
+        self::declareSchema($root, $boletas === true ? 'EnvioBOLETA_v11.xsd' : 'EnvioDTE_v10.xsd');
         $root->setAttribute('version', '1.0');
         $document->appendChild($root);
         $set = $document->createElementNS(self::SII_NAMESPACE, 'SetDTE');
@@ -324,6 +327,16 @@ class EnvelopeBuilder
         }
 
         return [$type, $issuer, $encoded];
+    }
+
+    /**
+     * El SII elige el XSD con el que valida el sobre a partir de xsi:schemaLocation; sin él responde
+     * "SCH-00001: Invalid Schema Name" (STATUS 7 en DTEUpload, HTTP 400 en la API de boletas).
+     */
+    private static function declareSchema(\DOMElement $root, string $schemaFile): void
+    {
+        $root->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:xsi', self::XSI_NAMESPACE);
+        $root->setAttributeNS(self::XSI_NAMESPACE, 'xsi:schemaLocation', self::SII_NAMESPACE . ' ' . $schemaFile);
     }
 
     private static function loadSafeXml(string $xml): \DOMDocument

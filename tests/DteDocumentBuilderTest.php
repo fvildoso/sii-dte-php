@@ -149,6 +149,12 @@ final class DteDocumentBuilderTest extends TestCase
         self::assertStringContainsString('<TED version="1.0">', $resultado['dte']);
         self::assertStringContainsString('<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">', $resultado['sobre']);
 
+        // El SII elige el XSD por xsi:schemaLocation (sin él: "SCH-00001: Invalid Schema Name").
+        $esquema = in_array($doc['tipo'], [39, 41], true) ? 'EnvioBOLETA_v11.xsd' : 'EnvioDTE_v10.xsd';
+        self::assertStringContainsString('xsi:schemaLocation="http://www.sii.cl/SiiDte ' . $esquema . '"', $resultado['sobre']);
+        // El DTE declara xmlns:xsi antes de firmarse para que su firma siga válida dentro del sobre.
+        self::assertStringContainsString('xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"', $resultado['dte']);
+
         $verificacion = new TedBuilder(new CafInspector())->verify($resultado['dte']);
         self::assertTrue($verificacion['frmt_verificada']);
         self::assertTrue($verificacion['datos_coinciden']);
