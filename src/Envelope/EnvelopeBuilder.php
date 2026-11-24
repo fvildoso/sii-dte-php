@@ -226,7 +226,8 @@ class EnvelopeBuilder
             }
             $boletas = $isBoleta;
             $counts[$type] = ($counts[$type] ?? 0) + 1;
-            $fragments .= $fragment;
+            // Cada DTE en su propia línea: el SII rechaza líneas de más de 4090 caracteres.
+            $fragments .= "\n" . $fragment;
         }
         if ($boletas === true && (count($dtesFirmados) > 500 || count($counts) > 2)) {
             throw new SiiException('Un sobre de boletas admite hasta 500 boletas y 2 tipos.');

@@ -152,6 +152,9 @@ final class DteDocumentBuilderTest extends TestCase
         // El SII elige el XSD por xsi:schemaLocation (sin él: "SCH-00001: Invalid Schema Name").
         $esquema = in_array($doc['tipo'], [39, 41], true) ? 'EnvioBOLETA_v11.xsd' : 'EnvioDTE_v10.xsd';
         self::assertStringContainsString('xsi:schemaLocation="http://www.sii.cl/SiiDte ' . $esquema . '"', $resultado['sobre']);
+        // El SII rechaza líneas de más de 4090 caracteres ("CHR-00002: Line too long").
+        $lineaMasLarga = max(array_map('strlen', explode("\n", $resultado['sobre'])));
+        self::assertLessThan(4090, $lineaMasLarga, 'El sobre tiene una línea demasiado larga para el SII.');
         // El DTE declara xmlns:xsi antes de firmarse para que su firma siga válida dentro del sobre.
         self::assertStringContainsString('xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"', $resultado['dte']);
 

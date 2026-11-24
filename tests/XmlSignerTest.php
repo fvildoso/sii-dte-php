@@ -82,7 +82,7 @@ class XmlSignerTest extends TestCase
         $signature = $this->directChild($root, 'Signature', self::DSIG_NAMESPACE);
         self::assertNotNull($document);
         self::assertNotNull($signature);
-        self::assertSame($document->nextSibling, $signature);
+        self::assertSame($document->nextElementSibling, $signature);
 
         $this->assertSignatureValid($signature, $document);
         $this->assertIndependentSignatureValid($doc, 0, 'DTE-1');
@@ -191,7 +191,7 @@ class XmlSignerTest extends TestCase
             $signature = $this->directChild($root, 'Signature', self::DSIG_NAMESPACE);
             self::assertNotNull($set);
             self::assertNotNull($signature);
-            self::assertSame($set->nextSibling, $signature);
+            self::assertSame($set->nextElementSibling, $signature);
             $this->assertSignatureValid($signature, $set);
             $this->assertIndependentSignatureValid($doc, 0, 'Set-1');
         }
@@ -371,13 +371,13 @@ class XmlSignerTest extends TestCase
         self::assertNotNull($certificate);
         self::assertNotNull($signatureValue);
         $certPem = "-----BEGIN CERTIFICATE-----\n"
-            . chunk_split($certificate->textContent, 64, "\n")
+            . chunk_split(self::b64($certificate->textContent), 64, "\n")
             . "-----END CERTIFICATE-----\n";
         $publicKey = openssl_pkey_get_public($certPem);
         self::assertNotFalse($publicKey);
         self::assertSame(
             0,
-            openssl_verify($signedInfo->C14N(), base64_decode($signatureValue->textContent, true), $publicKey, OPENSSL_ALGO_SHA1)
+            openssl_verify($signedInfo->C14N(), base64_decode(self::b64($signatureValue->textContent), true), $publicKey, OPENSSL_ALGO_SHA1)
         );
     }
 
@@ -424,6 +424,12 @@ class XmlSignerTest extends TestCase
         $this->assertIndependentVerificationFails($wrongKeyDocument, 0, $wrongKeyDetails['key']);
     }
 
+    /** XMLDSig admite espacios y saltos de línea dentro del base64; se quitan antes de decodificar. */
+    private static function b64(string $value): string
+    {
+        return preg_replace('/\s+/', '', $value) ?? '';
+    }
+
     private function assertSignatureValid(\DOMElement $signature, \DOMElement $target): void
     {
         $signedInfo = $signature->getElementsByTagNameNS(self::DSIG_NAMESPACE, 'SignedInfo')->item(0);
@@ -441,19 +447,19 @@ class XmlSignerTest extends TestCase
 
         self::assertSame(base64_encode(hash('sha1', $target->C14N(), true)), $digestValue->textContent);
         $certPem = "-----BEGIN CERTIFICATE-----\n"
-            . chunk_split($certificate->textContent, 64, "\n")
+            . chunk_split(self::b64($certificate->textContent), 64, "\n")
             . "-----END CERTIFICATE-----\n";
         $publicKey = openssl_pkey_get_public($certPem);
         self::assertNotFalse($publicKey);
         self::assertSame(
             1,
-            openssl_verify($signedInfo->C14N(), base64_decode($signatureValue->textContent, true), $publicKey, OPENSSL_ALGO_SHA1)
+            openssl_verify($signedInfo->C14N(), base64_decode(self::b64($signatureValue->textContent), true), $publicKey, OPENSSL_ALGO_SHA1)
         );
 
         $details = openssl_pkey_get_details($publicKey);
         self::assertIsArray($details);
-        self::assertSame($details['rsa']['n'], base64_decode($modulus->textContent, true));
-        self::assertSame($details['rsa']['e'], base64_decode($exponent->textContent, true));
+        self::assertSame($details['rsa']['n'], base64_decode(self::b64($modulus->textContent), true));
+        self::assertSame($details['rsa']['e'], base64_decode(self::b64($exponent->textContent), true));
     }
 
     private function assertIndependentSignatureValid(\DOMDocument $document, int $signaturePosition, string $expectedId): void

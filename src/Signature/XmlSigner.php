@@ -288,12 +288,54 @@ class XmlSigner
         }
 
         $signatureValue->appendChild($doc->createTextNode(base64_encode($signature)));
+        $this->formatSignature($doc, $signatureNode);
         $signedXml = $doc->saveXML();
         if ($signedXml === false) {
             throw new SiiException('No se pudo serializar el XML firmado.');
         }
 
         return $signedXml;
+    }
+
+    /**
+     * El SII rechaza los envíos con líneas de más de 4090 caracteres ("CHR-00002: Line too long").
+     * Corta el base64 en líneas de 76 caracteres y separa los elementos de la firma en líneas propias.
+     *
+     * Solo agrega espacios donde no alteran ninguna firma: fuera de SignedInfo (lo que se firma) y fuera
+     * del elemento referenciado. Las firmas de cada DTE se formatean al firmar el DTE, antes de que el
+     * sobre firme el SetDTE que las contiene.
+     */
+    private function formatSignature(\DOMDocument $doc, \DOMElement $signature): void
+    {
+        foreach (['SignatureValue', 'Modulus', 'X509Certificate'] as $name) {
+            $element = $signature->getElementsByTagNameNS(self::DSIG_NAMESPACE, $name)->item(0);
+            if ($element instanceof \DOMElement) {
+                $element->textContent = chunk_split(preg_replace('/\s+/', '', $element->textContent) ?? '', 76, "\n");
+            }
+        }
+
+        $breakChildren = function (\DOMElement $element) use ($doc, &$breakChildren): void {
+            if ($element->localName === 'SignedInfo') {
+                return;
+            }
+            $children = [];
+            foreach ($element->childNodes as $child) {
+                if ($child instanceof \DOMElement) {
+                    $children[] = $child;
+                }
+            }
+            if ($children === []) {
+                return;
+            }
+            foreach ($children as $child) {
+                $element->insertBefore($doc->createTextNode("\n"), $child);
+                $breakChildren($child);
+            }
+            $element->appendChild($doc->createTextNode("\n"));
+        };
+        $breakChildren($signature);
+
+        $signature->parentNode?->insertBefore($doc->createTextNode("\n"), $signature);
     }
 
     /**
