@@ -85,6 +85,29 @@ class TedBuilderTest extends TestCase
         self::assertStringNotContainsString($this->cafPrivateKeyPem, $signedDte);
     }
 
+    /**
+     * Reproduce la verificación del SII (reparo 510 "Firma Timbre Electrónico Incorrecta"): toma el DD del
+     * XML transmitido en ISO-8859-1, lo aplana y verifica FRMT con la llave pública del CAF. El CAF trae
+     * saltos de línea entre etiquetas, como los que entrega el SII, y el receptor tiene tildes y "&".
+     */
+    public function testFrmtVerificaComoElSiiConCafConSaltosDeLineaYTildes(): void
+    {
+        $authorization = preg_replace('/></', ">\n<", $this->authorizationXml());
+        $stamped = $this->builder()->addTedToDte($this->dte(), $authorization, 27, '2024-01-15T12:28:31', '2024-01-15T12:28:32');
+
+        self::assertSame(1, preg_match('#<DD>.*?</DD>#s', $stamped, $dd));
+        self::assertSame(1, preg_match('#<FRMT algoritmo="SHA1withRSA">([^<]+)</FRMT>#', $stamped, $frmt));
+        self::assertStringContainsString("caf\xE9 &amp; t\xE9", $dd[0], 'El DD debe ir en ISO-8859-1 con entidades escapadas.');
+        $aplanado = preg_replace('/>\s+</', '><', $dd[0]);
+        self::assertSame($aplanado, $dd[0], 'El DD del DTE debe ir aplanado, igual a lo firmado.');
+        self::assertSame(1, openssl_verify($aplanado, base64_decode($frmt[1]), $this->cafPublicKeyPem, OPENSSL_ALGO_SHA1));
+        self::assertTrue($this->builder()->verify($stamped)['frmt_verificada']);
+    }
+
+    /**
+     * El contenido léxico del CAF (por ejemplo, entidades) se conserva para no invalidar FRMA, pero el
+     * espacio entre etiquetas se elimina: el SII verifica FRMT sobre el DD aplanado.
+     */
     public function testConservaBytesOriginalesDelCafAlFirmarDteYSobre(): void
     {
         $authorization = str_replace(
@@ -93,7 +116,8 @@ class TedBuilderTest extends TestCase
             $this->authorizationXml()
         );
         self::assertSame(1, preg_match('/<CAF\b.*?<\/CAF>/s', $authorization, $matches));
-        $originalCaf = $matches[0];
+        $originalCaf = preg_replace('/>\s+</', '><', $matches[0]);
+        self::assertStringContainsString('<RS>Empresa&#x20;de prueba</RS>', $originalCaf);
 
         $stamped = $this->builder()->addTedToDte(
             $this->dte(),

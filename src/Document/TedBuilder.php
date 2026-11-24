@@ -93,6 +93,7 @@ final class TedBuilder
             throw new SiiException('No se pudo conservar el fragmento CAF original.');
         }
         $this->assertRawCafEncoding($authorizationXml, $rawCaf);
+        $rawCaf = self::flatten($rawCaf);
         $privateKeyPem = trim($this->requiredChild($authorizationRoot, 'RSASK', null)->textContent);
         $privateKey = openssl_pkey_get_private($privateKeyPem);
         if ($privateKey === false) {
@@ -187,9 +188,10 @@ final class TedBuilder
             && $fields['folio'] <= $cafFields['hasta']
             && $cafFields['fecha_autorizacion'] <= $fields['fecha_emision'];
 
+        $rawCaf = self::flatten($rawCaf);
         $expectedPayload = $this->buildSignaturePayload($fields, $cafNode, $ddTime, $rawCaf);
         $actualDd = $this->cloneElement(new \DOMDocument('1.0', 'ISO-8859-1'), $dd, null);
-        $actualPayload = XmlFragment::replace($this->serializeNode($actualDd), ['DD', 'CAF'], $rawCaf);
+        $actualPayload = self::flatten(XmlFragment::replace(self::toLatin1($this->serializeNode($actualDd)), ['DD', 'CAF'], $rawCaf));
         $dataMatches = hash_equals($expectedPayload, $actualPayload) && $keyMatches;
 
         $publicKey = $this->publicKeyFromCaf($cafNode);
@@ -224,11 +226,35 @@ final class TedBuilder
         string $timestamp,
         string $rawCaf,
     ): string {
-        return XmlFragment::replace(
-            $this->serializeNode($this->signatureDd($fields, $caf, $timestamp)),
+        return self::flatten(XmlFragment::replace(
+            self::toLatin1($this->serializeNode($this->signatureDd($fields, $caf, $timestamp))),
             ['DD', 'CAF'],
             $rawCaf
-        );
+        ));
+    }
+
+    /**
+     * El SII verifica FRMT sobre el DD "aplanado": sin espacios ni saltos de línea entre etiquetas.
+     * Los CAF que entrega el SII traen saltos de línea, así que el CAF se aplana tanto para firmar como
+     * para insertarlo en el DTE (solo cambia el espacio entre etiquetas, no los valores).
+     */
+    private static function flatten(string $xml): string
+    {
+        return trim(preg_replace('/>\s+</', '><', $xml) ?? $xml);
+    }
+
+    /**
+     * Los bytes firmados deben estar en ISO-8859-1, la codificación del DTE: saveXML() de un nodo
+     * devuelve UTF-8 aunque el documento declare otra codificación.
+     */
+    private static function toLatin1(string $utf8): string
+    {
+        $latin1 = @iconv('UTF-8', 'ISO-8859-1', $utf8);
+        if ($latin1 === false) {
+            throw new SiiException('El DD contiene caracteres que no se pueden representar en ISO-8859-1.');
+        }
+
+        return $latin1;
     }
 
     /**
